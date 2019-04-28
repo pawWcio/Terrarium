@@ -350,6 +350,7 @@ void loop() {
          Serial.print(" ");
          Serial.println(TxFrame.values.humidity);
          send_Data();
+         //test
        //  fan();
          counter = 0;
   }
