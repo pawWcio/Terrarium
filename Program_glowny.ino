@@ -15,7 +15,8 @@
 
 int wypelnienie = 0;
 int zmiana = 5;
-int pwmVal= 1;                                       
+int pwmVal= 1;
+byte relay=157;                                       
 unsigned long time;
 unsigned int rpm;
 String stringRPM;
@@ -223,6 +224,9 @@ void fan()
  }
 }
 
+
+
+
 void led(){
   analogWrite(LEDPIN, wypelnienie); //Generujemy sygnał o zadanym wypełnieniu
  
@@ -276,19 +280,37 @@ bool config=false;
        
 if (parse && config) {
   Serial.print("DS1307 configured Time=");
-  Serial.print(__TIME__);
+  Serial.print(tm.Hour);
+  Serial.print(":");
+  Serial.print(tm.Minute);
+  Serial.print(":");
+  Serial.print(tm.Second);
+  
   Serial.print(", Date=");
-  Serial.println(__DATE__);
+  Serial.print(tm.Day);
+  Serial.print(".");
+  Serial.print(tm.Month);
+  Serial.print(".");
+  Serial.print(1970+tm.Year);
 } 
 else if (parse) {
   Serial.println("DS1307 Communication Error :-{");
   Serial.println("Please check your circuitry");
 } 
 else {
-  Serial.print("Could not parse info from the compiler, Time=\"");
-  Serial.print(__TIME__);
+  Serial.print("Time=\"");
+  Serial.print(tm.Hour);
+  Serial.print(":");
+  Serial.print(tm.Minute);
+  Serial.print(":");
+  Serial.print(tm.Second);
+  
   Serial.print("\", Date=\"");
-  Serial.print(__DATE__);
+  Serial.print(tm.Day);
+  Serial.print(".");
+  Serial.print(tm.Month);
+  Serial.print(".");
+  Serial.print(1970+tm.Year);
   Serial.println("\"");
 }
 }
@@ -305,15 +327,69 @@ if (incomingByte == '1') {
 }
 
 if (incomingByte == '2') {
+  RTC.read(tm);
   printclock();
+
 }
+
+if (incomingByte == '5') {
+  hc595(relay);
+
+}
+
 }
 
 
+
+void lcdread(){
+      char buff [16];
+        sprintf(buff, "%d/%d/%d", tm.Day, tm.Month, 1970+tm.Year);
+        lcd.setCursor(0,0);
+        lcd.print(buff );
+        lcd.setCursor(0,1);
+        int i_hour = sprintf(buff, "%d:", tm.Hour);
+        if (i_hour<3){
+        i_hour = sprintf(buff, "0%d:", tm.Hour);
+        }
+        lcd.print(buff);
+              int i_minute = sprintf(buff, "%d:", tm.Minute);
+              if (i_minute<3){
+              i_hour = sprintf(buff, "0%d:", tm.Minute);
+              }
+              lcd.print(buff);
+                        int i_second = sprintf(buff, "%d", tm.Second);
+                        if (i_second<2){
+                        i_hour = sprintf(buff, "0%d", tm.Second);
+                        }
+                        lcd.print(buff);
+}
+
+
+
+
+void setbyte(int n, byte &number){      //ustawianie n-tego bitu w zmiennej number, referencja aby działać na zmienionej liczbie a nie jej kopii
+  number |= 1UL << n;
+}
+
+
+void clearbyte(int n, byte &number){    //czyszczenie n-tego bitu w zmiennej number
+  number &= ~(1UL << n);
+}
+
+
+void togglebyte(int n, byte &number){    //zamiana (negowanie) n-tego bitu w zmiennej number 0->1,1->0
+  number &= ~(1UL << n);
+}
+
+
+bool checkbyte(int n, byte number){    //sprawdzanie n-tego bitu w zmiennej number
+  return (number >> n) & 1U;             //zwrocenie wartosci n-tego bitu zmiennej number 
+}
 
 
 void loop() {
+  RTC.read(tm);
+  lcdread();
   led();
-
-   if (Serial.available()>0) readserial();
+  if (Serial.available()>0) readserial();
 }
