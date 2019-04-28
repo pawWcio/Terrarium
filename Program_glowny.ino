@@ -12,11 +12,12 @@
 #define DATAPIN           7
 #define CLOCKPIN          A1
 #define LATCHPIN          A0
+#define BULBRELAY         3
 
 int wypelnienie = 0;
 int zmiana = 5;
 int pwmVal= 1;
-byte relay=157;                                       
+byte relay=255;                                     //domyslna wartosc przekaznikow, wszystkie wylaczone                                         
 unsigned long time;
 unsigned int rpm;
 String stringRPM;
@@ -75,7 +76,7 @@ void setup()
   
   pinMode(PIR,      INPUT); //PIR jako wejście
   
-  hc595(254);
+  hc595(relay);
 
   
   Serial.begin(SERIALSPEED);       //uruchom UART z predkoscia 9600 baud
@@ -332,8 +333,19 @@ if (incomingByte == '2') {
 
 }
 
+if (incomingByte == '4') {
+zapalzarowke();
+
+}
+
 if (incomingByte == '5') {
-  hc595(relay);
+zgaszarowke();
+
+}
+
+
+if (incomingByte == '6') {
+zmienstanzarowki();
 
 }
 
@@ -378,12 +390,28 @@ void clearbyte(int n, byte &number){    //czyszczenie n-tego bitu w zmiennej num
 
 
 void togglebyte(int n, byte &number){    //zamiana (negowanie) n-tego bitu w zmiennej number 0->1,1->0
-  number &= ~(1UL << n);
+  number ^= 1UL << n;
 }
 
 
 bool checkbyte(int n, byte number){    //sprawdzanie n-tego bitu w zmiennej number
   return (number >> n) & 1U;             //zwrocenie wartosci n-tego bitu zmiennej number 
+}
+
+
+void zapalzarowke(){
+  clearbyte(BULBRELAY, relay);          //stan niski na bicie
+  hc595(relay);
+}
+
+void zgaszarowke(){                  
+  setbyte(BULBRELAY, relay);            //stan wysoki na bicie
+  hc595(relay);
+}
+
+void zmienstanzarowki(){                  
+  togglebyte(BULBRELAY, relay);            //stan wysoki na bicie
+  hc595(relay);
 }
 
 
