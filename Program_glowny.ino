@@ -6,7 +6,7 @@
 #define PIR 2                                       //deklaracja czujnika ruchu PIR na pinie 2
 #define PWMPIN 4                                    //deklaracja odczytu PWM wentylatora na pinie 3
 #define diodaPIN 3
-#define SENSORDHT21PIN 5                            //deklaracja czujnika na pinie 5
+#define SENSORDHT21PIN A2                            //deklaracja czujnika na pinie 5
 #define LEDPIN 6                                    //deklaracja diody na pinie 6
 #define TXFRAMESIZE 8                               //deklaracja rozmiaru ramki
 #define SERIALSPEED 9600                            //deklaracja prędkości transmisji portu szeregowego
@@ -340,8 +340,15 @@ void loop() {
                 delay(1000);
 
   
-  if(counter > 10){ 
+  if(counter > 1){ 
          read_SensorDHT21();
+         char buff [16];
+         //sprintf(buff, "%d, %d \n", 2, 3);
+//                  TxFrame.values.temperature = sensor.readTemperature();     //przypisz zmiennej temperatura odczyt temperatury powietrza
+//         TxFrame.values.humidity = sensor.readHumidity();      
+         Serial.print(TxFrame.values.temperature);
+         Serial.print(" ");
+         Serial.println(TxFrame.values.humidity);
          send_Data();
        //  fan();
          counter = 0;
