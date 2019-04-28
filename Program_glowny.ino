@@ -3,16 +3,15 @@
 #include "TimeLib.h"                                //importuj bibliotekę odczytu czasu
 #include "DS1307RTC.h"                              //importuj bibliotekę zegara RTC
 #include "LiquidCrystal_I2C.h"                      //importuj bibliotekę wyświetlacza LCD
-#define PIR 2                                       //deklaracja czujnika ruchu PIR na pinie 2
-#define PWMPIN 4                                    //deklaracja odczytu PWM wentylatora na pinie 3
-#define diodaPIN 3
-#define SENSORDHT21PIN A2                            //deklaracja czujnika na pinie 5
-#define LEDPIN 6                                    //deklaracja diody na pinie 6
-#define TXFRAMESIZE 8                               //deklaracja rozmiaru ramki
-#define SERIALSPEED 9600                            //deklaracja prędkości transmisji portu szeregowego
-#define dataPin 7
-#define clockPin A1
-#define latchPin A0
+#define PIR               2                                       //deklaracja czujnika ruchu PIR na pinie 2
+#define PWMPIN            4                                    //deklaracja odczytu PWM wentylatora na pinie 3
+#define LEDPIN            3                                    //deklaracja taśm led
+#define SENSORDHT21PIN    A2                            //deklaracja czujnika na pinie 5
+#define TXFRAMESIZE       8                               //deklaracja rozmiaru ramki
+#define SERIALSPEED       9600                            //deklaracja prędkości transmisji portu szeregowego
+#define DATAPIN           7
+#define CLOCKPIN          A1
+#define LATCHPIN          A0
 
 int wypelnienie = 0;
 int zmiana = 5;
@@ -50,9 +49,9 @@ union send_frame TxFrame;                           //ramka transmiji danych
 
 
 void hc595(byte value){
-  digitalWrite(latchPin, LOW);
-  shiftOut(dataPin, clockPin, MSBFIRST , value);
-  digitalWrite(latchPin, HIGH);
+  digitalWrite(LATCHPIN, LOW);
+  shiftOut(DATAPIN, CLOCKPIN, MSBFIRST , value);
+  digitalWrite(LATCHPIN, HIGH);
 }
 
 
@@ -67,9 +66,14 @@ byte setBit(byte &number, byte n, byte value){  // zwracamy liczbę przez refere
  
 void setup() 
 {
-  pinMode(dataPin, OUTPUT);
-  pinMode(clockPin, OUTPUT);
-  pinMode(latchPin, OUTPUT);
+  pinMode(DATAPIN,  OUTPUT);
+  pinMode(CLOCKPIN, OUTPUT);
+  pinMode(LATCHPIN, OUTPUT);
+  pinMode(LEDPIN,   OUTPUT);
+  pinMode(PWMPIN,   OUTPUT);  
+  
+  pinMode(PIR,      INPUT); //PIR jako wejście
+  
   hc595(254);
 
   
@@ -77,15 +81,13 @@ void setup()
   set_time();                      //ustawienie czasu
   lcd.init();                      //inicjalizacja wyswitlacza LCD 
   lcd.backlight();                 //podświetlenie wyswietlacza LCD
-  read_time();                     //odczyt czasu
 
-  pinMode(LEDPIN,OUTPUT);
-  pinMode(PIR, INPUT); //PIR jako wejście
+
   sensor.begin();                                             //uruchom modul DHT
   read_SensorDHT21();
 //  TxFrame.values.temperature = sensor.readTemperature();      //przypisz zmiennej temperatura odczyt temperatury powietrza
 //  TxFrame.values.humidity = sensor.readHumidity();            //przypisz zmiennej wilgotność odczyt wilgotnosci powietrza
-   pinMode(PWMPIN, OUTPUT);   
+  
    TCCR2A = 0x23;     // COM2B1, WGM21, WGM20 
    // Set prescaler  
    TCCR2B = 0x0A;   // WGM21, Prescaler = /8
@@ -120,33 +122,6 @@ void set_time(){
   Serial.println("-------------------");
 }
 
-
-
-
-
-
-void read_time(){
-  bool parse=false;
-  bool config=false;
-
-  while (!Serial) ; // wait for Arduino Serial Monitor
-  delay(200);
-  if (parse && config) {
-    Serial.print("DS1307 configured Time=");
-    Serial.print(__TIME__);
-    Serial.print(", Date=");
-    Serial.println(__DATE__);
-  } else if (parse) {
-    Serial.println("DS1307 Communication Error :-{");
-    Serial.println("Please check your circuitry");
-  } else {
-    Serial.print("Could not parse info from the compiler, Time=\"");
-    Serial.print(__TIME__);
-    Serial.print("\", Date=\"");
-    Serial.print(__DATE__);
-    Serial.println("\"");
-  }
-}
 
 
 
@@ -249,7 +224,7 @@ void fan()
 }
 
 void led(){
-  analogWrite(diodaPIN, wypelnienie); //Generujemy sygnał o zadanym wypełnieniu
+  analogWrite(LEDPIN, wypelnienie); //Generujemy sygnał o zadanym wypełnieniu
  
  if (wypelnienie < 255) { //Jeśli wypełnienie mniejsze od 100%
  wypelnienie = wypelnienie + zmiana; //Zwiększamy wypełnienie
@@ -286,81 +261,59 @@ char getRPMS() {
 
 
 
+void printsensor(){
+Serial.print(TxFrame.values.temperature);
+Serial.print(" ");
+Serial.println(TxFrame.values.humidity);
+}
+
+
+
+
+void printclock(){
+bool parse=false;
+bool config=false;
+       
+if (parse && config) {
+  Serial.print("DS1307 configured Time=");
+  Serial.print(__TIME__);
+  Serial.print(", Date=");
+  Serial.println(__DATE__);
+} 
+else if (parse) {
+  Serial.println("DS1307 Communication Error :-{");
+  Serial.println("Please check your circuitry");
+} 
+else {
+  Serial.print("Could not parse info from the compiler, Time=\"");
+  Serial.print(__TIME__);
+  Serial.print("\", Date=\"");
+  Serial.print(__DATE__);
+  Serial.println("\"");
+}
+}
+
+
+
+void readserial(){
+byte incomingByte=0;
+incomingByte = Serial.read(); 
+    
+if (incomingByte == '1') {
+  read_SensorDHT21();
+  printsensor();
+}
+
+if (incomingByte == '2') {
+  printclock();
+}
+}
+
+
 
 
 void loop() {
   led();
- if (RTC.read(tm)) {
-    Serial.print("Ok, Time = ");
-    print2digits(tm.Hour);
-    Serial.write(':');
-    print2digits(tm.Minute);
-    Serial.write(':');
-    print2digits(tm.Second);
-    Serial.print(", Date (D/M/Y) = ");
-    Serial.print(tm.Day);
-    Serial.write('/');
-    Serial.print(tm.Month);
-    Serial.write('/');
-    Serial.print(tmYearToCalendar(tm.Year));
-    Serial.println();
-      
-      char buff [16];
-        sprintf(buff, "%d/%d/%d", tm.Day, tm.Month, 1970+tm.Year);
-        lcd.setCursor(0,0);
-        lcd.print(buff );
-        lcd.setCursor(0,1);
-        int i_hour = sprintf(buff, "%d:", tm.Hour);
-        if (i_hour<3){
-        i_hour = sprintf(buff, "0%d:", tm.Hour);
-        }
-        lcd.print(buff);
-              int i_minute = sprintf(buff, "%d:", tm.Minute);
-              if (i_minute<3){
-              i_hour = sprintf(buff, "0%d:", tm.Minute);
-              }
-              lcd.print(buff);
-                        int i_second = sprintf(buff, "%d", tm.Second);
-                        if (i_second<2){
-                        i_hour = sprintf(buff, "0%d", tm.Second);
-                        }
-                        lcd.print(buff);
- }
-                else {
-                if (RTC.chipPresent()) {
-                  Serial.println("The DS1307 is stopped.  Please run the SetTime");
-                  Serial.println("example to initialize the time and begin running.");
-                  Serial.println();
-                } else {
-                  Serial.println("DS1307 read error!  Please check the circuitry.");
-                  Serial.println();
-                }
-                delay(9000);
-                }
-                delay(1000);
 
-  
-  if(counter > 1){ 
-         read_SensorDHT21();
-         char buff [16];
-         //sprintf(buff, "%d, %d \n", 2, 3);
-//                  TxFrame.values.temperature = sensor.readTemperature();     //przypisz zmiennej temperatura odczyt temperatury powietrza
-//         TxFrame.values.humidity = sensor.readHumidity();      
-         Serial.print(TxFrame.values.temperature);
-         Serial.print(" ");
-         Serial.println(TxFrame.values.humidity);
-         send_Data();
-         //test
-       //  fan();
-         counter = 0;
-  }
-
-  if (Serial.available()>0){
-    uint8_t serial_read_data = Serial.read();
-    set_fan_speed(serial_read_data);
-  }                       
-
-  counter ++;
-  delay(10);                                           //odczekaj 10 milisekund między pomiarami
-  
+   if (Serial.available()>0) readserial();
 }
