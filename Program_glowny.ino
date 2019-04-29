@@ -9,15 +9,16 @@
 
 //*************************************          DEFINITIONS          **************************************
 
-#define PIRPIN            2                         //deklaracja pinu czujnika ruchu PIR
-#define LEDPIN            3                         //deklaracja pinu taśm LED
+//#define PIRPIN            2                         //deklaracja pinu czujnika ruchu PIR
+#define LEDPIN            5                         //deklaracja pinu taśm LED
 #define RPMPIN            4                         //deklaracja pinu odczytu predkosci wentylatora   
-#define PWMPIN            5                         //deklaracja pinu sterujacego PWM wentylatora
+#define PWMPIN            3                         //deklaracja pinu sterujacego PWM wentylatora
 #define DATAPIN           7                         //deklaracja pinu ustawiającego dane rejestru przesuwnego
 #define LATCHPIN          A0                        //deklaracja pinu zatrzasku rejestru przesuwnego
 #define CLOCKPIN          A1                        //deklaracja pinu przesuwającego rejestru przesuwnego
 #define SENSORDHT21PIN    A2                        //deklaracja pinu czujnika temperatury i wilgotnosci
 
+#define FANRELAY          0                         //deklaracja numeru bitu odpowiedzialnego za wentylator
 #define BULBRELAY         7                         //deklaracja numeru bitu odpowiedzialnego za zarowke
 #define TXFRAMESIZE       8                         //deklaracja rozmiaru ramki
 #define SERIALSPEED       9600                      //deklaracja prędkości transmisji portu szeregowego
@@ -31,8 +32,13 @@ int change = 5;                                     //zmiana poziomu swiecenia t
 int maxledbright = 255;                             //maksymalna jasnosc swiecenia tasmy LED
 byte relay = 255;                                   //domyslna wartosc przekaznikow (255 wszystkie wylaczone)                                         
 unsigned long time;                                 //zmienna okresu wentylatora
-unsigned int rpm;                                   //zmienna predkosci obrotow wentylatora
+unsigned int rpmfan;                                   //zmienna predkosci obrotow wentylatora
 String stringRPM;                                   //predkosc obrotow wentylatora zapisana w ciagu znakow
+
+int pwmPin     = 3; // digital PWM pin 9
+int pwmVal     = 1; // The PWM Value
+int speeddutycycle = 0;
+
 
 
 //*************************************          STRUCTURES          **************************************
@@ -74,7 +80,7 @@ void setup()                                        //funkcja konfiguracyjna
   pinMode(LEDPIN,   OUTPUT);                        //ustawienie pinu tasmy LED jako wyjscie
   pinMode(PWMPIN,   OUTPUT);                        //ustawienie pinu sterowania PWM wentylatora jako wyjscie
   
-  pinMode(PIRPIN,   INPUT);                         //ustawienie pinu czujnika PIR jako wejscie
+//  pinMode(PIRPIN,   INPUT);                         //ustawienie pinu czujnika PIR jako wejscie
   pinMode(RPMPIN,   INPUT);                         //ustawienie pinu odczytu predkosci wentylatora jako wejscie
   
   hc595(relay);                                     //ustawienie wyjsc rejestru przesuwnego na zadeklarowana wczesniej wartosc
@@ -91,8 +97,10 @@ void setup()                                        //funkcja konfiguracyjna
   OCR2A = 79;                                       //ustawienie najwyzszej wartosci, od ktorej bedzie odliczane w dol (ustawia wypelnienie PWM- nie zmieniac!)
   OCR2B = 0;                                        //ustawienie wartosci PWM (0-79)
 // digitalWrite(RPMPIN, HIGH);                      //odczyt redkosci wentylatora
-}
 
+
+
+}
 
 //*************************************          SHIFT REGISTER          **************************************
 
@@ -251,7 +259,6 @@ void ledfade()
  } else {
  pulsewidth = 0; //Jeśli wypełnienie rowne 0% to zatrzymaj zmiany
  }
- 
  delay(ledtime); //Małe opóźnienie, aby efekt był widoczny
 }
 
@@ -264,7 +271,6 @@ void ledbright()
  } else {
  pulsewidth = 0; //Jeśli wypełnienie większe od 100%, to wracamy na początek
  }
- 
  delay(ledtime); //Małe opóźnienie, aby efekt był widoczny
 }
 
@@ -281,30 +287,30 @@ void set_fan_speed(uint8_t duty_cycle)
 char getRPMS() 
 {
  time = pulseIn(RPMPIN, HIGH);
-  //  Serial.println(rpm, DEC);
- rpm = (1000000 * 60) / (time * 4);
- stringRPM = String(rpm);
- if (stringRPM.length() < 5) {
-   Serial.println(rpm, DEC);
- }
+ rpmfan = (1000000 * 60) / (time * 4);
+ stringRPM = String(rpmfan);
+ //if (stringRPM.length() < 5) {
+   Serial.println(rpmfan, DEC);
+// }
 }
 
 void fan()
 {
- unsigned int x;
-  //ramp up fan speed by increasing duty cycle every 200mS, takes 16 seconds
- for(x = 0; x < 80; x++) {
-   OCR2B = x;    // set duty cycle
-   getRPMS();
-   Serial.println(x);
-   delay(200);
- }
- while (Serial.available() == 0);
- int val = Serial.parseInt();
- if (val > 0 && val < 80) {
-     OCR2B = val;
+ 
+ speeddutycycle+=10;
+ if (speeddutycycle > 0 && speeddutycycle < 80) {
+     OCR2B = speeddutycycle;
+     
+     
  }
 }
+
+void togglefan()
+{                  
+  togglebyte(FANRELAY, relay);            //stan wysoki na bicie
+  hc595(relay);
+}
+ 
 
 
 //*************************************          SERIAL MONITOR          **************************************
@@ -389,6 +395,16 @@ if (incomingByte == '6') {
 togglebulb();
 
 }
+
+if (incomingByte == '7') {
+togglefan();
+
+}
+
+if (incomingByte == '8') {
+fan();
+}
+
 
 }
 
