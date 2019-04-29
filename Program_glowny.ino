@@ -3,35 +3,37 @@
 #include "TimeLib.h"                                //importuj bibliotekę odczytu czasu
 #include "DS1307RTC.h"                              //importuj bibliotekę zegara RTC
 #include "LiquidCrystal_I2C.h"                      //importuj bibliotekę wyświetlacza LCD
-#define PIR               2                                       //deklaracja czujnika ruchu PIR na pinie 2
-#define PWMPIN            4                                    //deklaracja odczytu PWM wentylatora na pinie 3
-#define LEDPIN            3                                    //deklaracja taśm led
-#define SENSORDHT21PIN    A2                            //deklaracja czujnika na pinie 5
-#define TXFRAMESIZE       8                               //deklaracja rozmiaru ramki
-#define SERIALSPEED       9600                            //deklaracja prędkości transmisji portu szeregowego
-#define DATAPIN           7
-#define CLOCKPIN          A1
-#define LATCHPIN          A0
-#define BULBRELAY         3
 
-int wypelnienie = 0;
-int zmiana = 5;
-int pwmVal= 1;
-byte relay=255;                                     //domyslna wartosc przekaznikow, wszystkie wylaczone                                         
+#define PIRPIN            2                         //deklaracja czujnika ruchu PIR
+#define LEDPIN            3                         //deklaracja taśm led
+#define PWMPIN            5                         //deklaracja pinu sterujacego PWM wentylatora
+#define DATAPIN           7                         //deklaracja pinu ustawiającego dane rejestru przesuwnego
+#define LATCHPIN          A0                        //deklaracja pinu zatrzasku rejestru przesuwnego
+#define CLOCKPIN          A1                        //deklaracja pinu przesuwającego rejestru przesuwnego
+#define SENSORDHT21PIN    A2                        //deklaracja czujnika temperatury i wilgotnosci
+
+#define BULBRELAY         7                         //deklaracja numeru bitu odpowiedzialnego za zarowke
+#define TXFRAMESIZE       8                         //deklaracja rozmiaru ramki
+#define SERIALSPEED       9600                      //deklaracja prędkości transmisji portu szeregowego
+
+int pulsewidth = 0;                                 //wypelnienie sygnalu regulujacego jasnosc swiecenia ledow
+int ledtime = 100;                                  //okres zmian jasnosci swiecenia ledow
+int change = 5;                                     //zmiana poziomu swiecenia ledow
+int maxledbright = 255;                             //maksymalna jasnosc swiecenia ledow
+byte relay = 255;                                   //domyslna wartosc przekaznikow (255 wszystkie wylaczone)                                         
 unsigned long time;
 unsigned int rpm;
 String stringRPM;
+
 DHT sensor(SENSORDHT21PIN, DHT21);                  //utwórz instancję dla czujnika DHT21
 LiquidCrystal_I2C lcd(0x3F,16,2);                   //utwórz instancję dla wyświetlacza LCD
 
-struct data {                                       //struktura danych
+struct data {                                       //struktura danych z czunika DHT21
   float humidity;                                   //zmienna wilgotności
   float temperature;                                //zmienna temperatury
 };
 
-int counter = 0;                                    //zmienna licznika
-
-tmElements_t tm;                                    //definicja klasy czasu
+tmElements_t tm;                                    //definicja klasy czasu zegara
 
 const char *monthName[12] = {                       //definicja tablicy miesięcy
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -50,20 +52,6 @@ union send_frame {                                  //definicja unii wysyłanej 
 union send_frame TxFrame;                           //ramka transmiji danych
 
 
-void hc595(byte value){
-  digitalWrite(LATCHPIN, LOW);
-  shiftOut(DATAPIN, CLOCKPIN, MSBFIRST , value);
-  digitalWrite(LATCHPIN, HIGH);
-}
-
-
-
-byte setBit(byte &number, byte n, byte value){  // zwracamy liczbę przez referencję i zmieniamy bit
-  return number |= number ^= (-value ^ number) & (1UL << n);
-}
-
-
-
 
  
 void setup() 
@@ -74,7 +62,7 @@ void setup()
   pinMode(LEDPIN,   OUTPUT);
   pinMode(PWMPIN,   OUTPUT);  
   
-  pinMode(PIR,      INPUT); //PIR jako wejście
+  pinMode(PIRPIN,      INPUT); //PIR jako wejście
   
   hc595(relay);
 
@@ -87,8 +75,6 @@ void setup()
 
   sensor.begin();                                             //uruchom modul DHT
   read_SensorDHT21();
-//  TxFrame.values.temperature = sensor.readTemperature();      //przypisz zmiennej temperatura odczyt temperatury powietrza
-//  TxFrame.values.humidity = sensor.readHumidity();            //przypisz zmiennej wilgotność odczyt wilgotnosci powietrza
   
    TCCR2A = 0x23;     // COM2B1, WGM21, WGM20 
    // Set prescaler  
@@ -99,6 +85,21 @@ void setup()
 //   digitalWrite(2, HIGH);   // Starts reading
    Serial.begin(9600);
 
+}
+
+
+
+
+void hc595(byte value){                             //funkcja sterowania rejestrem przesuwnym
+  digitalWrite(LATCHPIN, LOW);
+  shiftOut(DATAPIN, CLOCKPIN, MSBFIRST , value);
+  digitalWrite(LATCHPIN, HIGH);
+}
+
+
+
+byte setBit(byte &number, byte n, byte value){      //zwracamy liczbę przez referencję i zmieniamy bit
+  return number |= number ^= (-value ^ number) & (1UL << n);
 }
 
 
@@ -206,6 +207,55 @@ void read_SensorDHT21(){
 
 
 
+void ledfade(){
+  analogWrite(LEDPIN, pulsewidth); //Generujemy sygnał o zadanym wypełnieniu
+ 
+ if (pulsewidth > 0) { //Jeśli wypełnienie wieksze od 0%
+ pulsewidth = pulsewidth - change; //Zmniejszamy wypełnienie
+ } else {
+ pulsewidth = 0; //Jeśli wypełnienie rowne 0% to zatrzymaj zmiany
+ }
+ 
+ delay(ledtime); //Małe opóźnienie, aby efekt był widoczny
+}
+
+
+
+void ledbright(){
+  analogWrite(LEDPIN, pulsewidth); //Generujemy sygnał o zadanym wypełnieniu
+ 
+ if (pulsewidth < maxledbright) { //Jeśli wypełnienie mniejsze od 100%
+ pulsewidth = pulsewidth + change; //Zwiększamy wypełnienie
+ } else {
+ pulsewidth = 0; //Jeśli wypełnienie większe od 100%, to wracamy na początek
+ }
+ 
+ delay(ledtime); //Małe opóźnienie, aby efekt był widoczny
+}
+
+
+
+
+void set_fan_speed(uint8_t duty_cycle){
+ if (duty_cycle > 0 && duty_cycle < 80) {
+     OCR2B = duty_cycle;
+ }
+}
+
+
+
+
+char getRPMS() {
+ time = pulseIn(2, HIGH);
+  //  Serial.println(rpm, DEC);
+ rpm = (1000000 * 60) / (time * 4);
+ stringRPM = String(rpm);
+ if (stringRPM.length() < 5) {
+   Serial.println(rpm, DEC);
+ }
+}
+
+
 
 
 void fan()
@@ -222,44 +272,6 @@ void fan()
  int val = Serial.parseInt();
  if (val > 0 && val < 80) {
      OCR2B = val;
- }
-}
-
-
-
-
-void led(){
-  analogWrite(LEDPIN, wypelnienie); //Generujemy sygnał o zadanym wypełnieniu
- 
- if (wypelnienie < 255) { //Jeśli wypełnienie mniejsze od 100%
- wypelnienie = wypelnienie + zmiana; //Zwiększamy wypełnienie
- } else {
- wypelnienie = 0; //Jeśli wypełnienie większe od 100%, to wracamy na początek
- }
- 
- delay(50); //Małe opóźnienie, aby efekt był widoczny
-}
-
-
-
-
-void set_fan_speed(uint8_t duty_cycle){
- if (duty_cycle > 0 && duty_cycle < 80) {
-     OCR2B = duty_cycle;
- }
-}
-
-
-
-
-
-char getRPMS() {
- time = pulseIn(2, HIGH);
-  //  Serial.println(rpm, DEC);
- rpm = (1000000 * 60) / (time * 4);
- stringRPM = String(rpm);
- if (stringRPM.length() < 5) {
-   Serial.println(rpm, DEC);
  }
 }
 
@@ -418,6 +430,6 @@ void zmienstanzarowki(){
 void loop() {
   RTC.read(tm);
   lcdread();
-  led();
+  ledbright();
   if (Serial.available()>0) readserial();
 }
