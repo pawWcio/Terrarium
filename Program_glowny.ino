@@ -14,9 +14,12 @@
 #define RPMPIN            4                         //deklaracja pinu odczytu predkosci wentylatora   
 #define PWMPIN            3                         //deklaracja pinu sterujacego PWM wentylatora
 #define DATAPIN           7                         //deklaracja pinu ustawiającego dane rejestru przesuwnego
+#define DIODEPIN          8                         //deklaracja pinu diody LED
+#define DIODEBULBPIN      13                        //deklaracja pinu diody sygnalizujacego prace zarowki
 #define LATCHPIN          A0                        //deklaracja pinu zatrzasku rejestru przesuwnego
 #define CLOCKPIN          A1                        //deklaracja pinu przesuwającego rejestru przesuwnego
 #define SENSORDHT21PIN    A2                        //deklaracja pinu czujnika temperatury i wilgotnosci
+#define LIGHTSENSORPIN    A5                        //deklaracja pinu czujnika natezenia swiatla
 
 #define FANRELAY          0                         //deklaracja numeru bitu odpowiedzialnego za wentylator
 #define BULBRELAY         7                         //deklaracja numeru bitu odpowiedzialnego za zarowke
@@ -30,13 +33,15 @@ int pulsewidth = 0;                                 //wypelnienie sygnalu regulu
 int ledtime = 100;                                  //okres zmian jasnosci swiecenia tasmy LED
 int change = 5;                                     //zmiana poziomu swiecenia tasmy LED
 int maxledbright = 255;                             //maksymalna jasnosc swiecenia tasmy LED
+int lightsensorvalue = 0;                           //odczyt wartosci natezenia swiatla
+int lightintensity = 100;                           //zdeklarowany poziom wlaczenia oswietlenia nocnego
 byte relay = 255;                                   //domyslna wartosc przekaznikow (255 wszystkie wylaczone)                                         
 unsigned long time;                                 //zmienna okresu wentylatora
 unsigned int rpmfan;                                //zmienna predkosci obrotow wentylatora
 String stringRPM;                                   //predkosc obrotow wentylatora zapisana w ciagu znakow
 
-int pwmPin     = 3; // digital PWM pin 9
-int pwmVal     = 1; // The PWM Value
+int pwmPin = 3; // digital PWM pin 9
+int pwmVal = 1; // The PWM Value
 int speeddutycycle = 0;                             //wypelnienie sygnalu wentylatora (w zakresie od 0-80)
 
 
@@ -74,14 +79,15 @@ union send_frame TxFrame;                           //ramka transmiji danych
  
 void setup()                                        //funkcja konfiguracyjna
 {
-  pinMode(DATAPIN,  OUTPUT);                        //ustawienie pinu danych rejestru jako wyjscie
-  pinMode(CLOCKPIN, OUTPUT);                        //ustawienie pinu zegarowego rejestru jako wyjscie
-  pinMode(LATCHPIN, OUTPUT);                        //ustawienie pinu zatrzasku rejestru jako wyjscie
-  pinMode(LEDPIN,   OUTPUT);                        //ustawienie pinu tasmy LED jako wyjscie
-  pinMode(PWMPIN,   OUTPUT);                        //ustawienie pinu sterowania PWM wentylatora jako wyjscie
+  pinMode(DATAPIN,        OUTPUT);                  //ustawienie pinu danych rejestru jako wyjscie
+  pinMode(CLOCKPIN,       OUTPUT);                  //ustawienie pinu zegarowego rejestru jako wyjscie
+  pinMode(LATCHPIN,       OUTPUT);                  //ustawienie pinu zatrzasku rejestru jako wyjscie
+  pinMode(LEDPIN,         OUTPUT);                  //ustawienie pinu tasmy LED jako wyjscie
+  pinMode(PWMPIN,         OUTPUT);                  //ustawienie pinu sterowania PWM wentylatora jako wyjscie
+  pinMode(LIGHTSENSORPIN, OUTPUT);                  //ustawienie pinu czujnika natezenia swiatla jako wyjscie    
   
-  pinMode(PIRPIN,   INPUT);                         //ustawienie pinu czujnika PIR jako wejscie
-  pinMode(RPMPIN,   INPUT);                         //ustawienie pinu odczytu predkosci wentylatora jako wejscie
+  pinMode(PIRPIN,         INPUT);                   //ustawienie pinu czujnika PIR jako wejscie
+  pinMode(RPMPIN,         INPUT);                   //ustawienie pinu odczytu predkosci wentylatora jako wejscie
   
   hc595(relay);                                     //ustawienie wyjsc rejestru przesuwnego na zadeklarowana wczesniej wartosc
 
@@ -94,8 +100,8 @@ void setup()                                        //funkcja konfiguracyjna
   
   TCCR2A = 0x23;                                    //ustawienie prescalera (COM2B1, WGM21, WGM20)  
   TCCR2B = 0x0A;                                    //ustawienie prescalera (WGM21, Prescaler =/8)
-  OCR2A = 79;                                       //ustawienie najwyzszej wartosci, od ktorej bedzie odliczane w dol (ustawia wypelnienie PWM- nie zmieniac!)
-  OCR2B = 0;                                        //ustawienie wartosci PWM (0-79)
+  OCR2A = 79;                                       //ustawienie najwyzszej wartosci wypelnienia PWM, od ktorej bedzie odliczane w dol
+  OCR2B = 0;                                        //ustawienie najnizszej wartosci wypelnienia PWM, od ktorej bedzie odliczane w gore
 // digitalWrite(RPMPIN, HIGH);                      //odczyt predkosci wentylatora
 
 
@@ -106,23 +112,23 @@ void setup()                                        //funkcja konfiguracyjna
 
 void hc595(byte value)                              //funkcja sterowania rejestrem przesuwnym
 {
-  digitalWrite(LATCHPIN, LOW);
-  shiftOut(DATAPIN, CLOCKPIN, MSBFIRST , value);
-  digitalWrite(LATCHPIN, HIGH);
+  digitalWrite(LATCHPIN, LOW);                      //zatrzask ustawiony w stan niski (zablokowanie wyjsc rejestru)
+  shiftOut(DATAPIN, CLOCKPIN, MSBFIRST , value);    //pojedynczy przesuw bajtow danych, zaczynajac od najbardziej znaczacego
+  digitalWrite(LATCHPIN, HIGH);                     //zatrzask ustawiony w stan wysoki (odblokowanie wyjsc rejestru)
 }
 
 
 //*************************************          TRANSMISION          **************************************
 
-void setup_TxFrame_data()
+void setup_TxFrame_data()                           //funkcja deklarujaca ramke transmisji danych
 {
-//  TxFrame.values.start_code=0x40;
-//  TxFrame.values.code=0x20;
-//  TxFrame.values.length_frame=TXFRAMESIZE;
-//  TxFrame.values.stop_code=0x80; 
+//  TxFrame.values.start_code=0x40;                 //kod poczatku
+//  TxFrame.values.code=0x20;                       //kod funkcji
+//  TxFrame.values.length_frame=TXFRAMESIZE;        //kod dlugosci ramki
+//  TxFrame.values.stop_code=0x80;                  //kod konca 
 }
 
-void send_Data()
+void send_Data()                                    //funkcja przesylu ramki danych
 {
  Serial.write(TxFrame.bytes_to_send.tab_bytes, TXFRAMESIZE);
 }
@@ -131,44 +137,43 @@ void send_Data()
 
 //*************************************          BYTES          **************************************
 
-byte setBit(byte &number, byte n, byte value)      //zwracamy liczbę przez referencję i zmieniamy bit
+byte set_Bit(byte &number, byte n, byte value)      //funkcja zwracajaca liczbe przez referencje i zmieniajaca bit
 {
   return number |= number ^= (-value ^ number) & (1UL << n);
 }
 
-void setbyte(int n, byte &number)      //ustawianie n-tego bitu w zmiennej number, referencja aby działać na zmienionej liczbie a nie jej kopii
+void set_Byte(int n, byte &number)                  //ustawianie n-tego bitu w zmiennej number, referencja aby działać na zmienionej liczbie a nie jej kopii
 {
   number |= 1UL << n;
 }
 
 
-void clearbyte(int n, byte &number)    //czyszczenie n-tego bitu w zmiennej number
+void clear_Byte(int n, byte &number)                //czyszczenie n-tego bitu w zmiennej number
 {
   number &= ~(1UL << n);
 }
 
 
-void togglebyte(int n, byte &number)    //zamiana (negowanie) n-tego bitu w zmiennej number 0->1,1->0
+void toggle_Byte(int n, byte &number)               //zamiana (negowanie) n-tego bitu w zmiennej number 0->1,1->0
 {
   number ^= 1UL << n;
 }
 
 
-bool checkbyte(int n, byte number)    //sprawdzanie n-tego bitu w zmiennej number
+bool check_Byte(int n, byte number)                 //sprawdzanie n-tego bitu w zmiennej number
 {
-  return (number >> n) & 1U;             //zwrocenie wartosci n-tego bitu zmiennej number 
+  return (number >> n) & 1U;                        //zwrocenie wartosci n-tego bitu zmiennej number 
 }
 
 
 //*************************************          REAL TIME CLOCK          **************************************
 
-void set_time()
+void set_time()                                     //funkcja konfigurujaca czas zegara
 {
   bool parse=false;
   bool config=false;
 
-  // get the date and time the compiler was run
-  if (getDate(__DATE__) && getTime(__TIME__)) {
+  if (getDate(__DATE__) && getTime(__TIME__)) {     //sprawdzenie poprawnosci konfiguracji zegara
     parse = true;
     // and configure the RTC with this info
     if (RTC.write(tm)) {
@@ -176,27 +181,27 @@ void set_time()
     }
   }
 
-  Serial.begin(9600);
+  Serial.begin(9600);                               //wlaczenie portu szeregowego
   while (!Serial) ; // wait for serial
   delay(200);
-  Serial.println("DS1307RTC Read Test");
+  Serial.println("DS1307RTC Read Test");            //wyswietlenie informacji o poprawnej konfiguracji zegara
   Serial.println("-------------------");
 }
 
-bool getTime(const char *str)
+bool getTime(const char *str)                       //funkcja ustawiajaca czas rzeczywisty zegara
 {
-  int Hour, Min, Sec;
+  int Hour, Min, Sec;                               //deklaracja zmiennych czasu
 
   if (sscanf(str, "%d:%d:%d", &Hour, &Min, &Sec) != 3) return false;
-  tm.Hour = Hour;
+  tm.Hour = Hour;                                   //przypisanie wartosci do zmiennych
   tm.Minute = Min;
   tm.Second = Sec;
   return true;
 }
 
-bool getDate(const char *str)
+bool getDate(const char *str)                       //funkcja ustawiajaca date zegara
 {
-  char Month[12];
+  char Month[12];                                   //zmienne daty
   int Day, Year;
   uint8_t monthIndex;
 
@@ -205,7 +210,7 @@ bool getDate(const char *str)
     if (strcmp(Month, monthName[monthIndex]) == 0) break;
   }
   if (monthIndex >= 12) return false;
-  tm.Day = Day;
+  tm.Day = Day;                                      //przypisanie wartosci do zmiennych
   tm.Month = monthIndex + 1;
   tm.Year = CalendarYrToTm(Year);
   return true;
@@ -214,20 +219,20 @@ bool getDate(const char *str)
 
 //*************************************          LCD SCREEN         **************************************
 
-void lcdscreen()
+void lcdDisplay()                                    //funkcja wyswietlajaca dane na wyswietlaczu LCD
 {
- char buff [16];
- lcd.setCursor(0,0);
- int i_hour = sprintf(buff, "%d:", tm.Hour);
+ char buff [16];                                     //stworzenie bufora znakow
+ lcd.setCursor(0,0);                                 //ustawienie kursora na wyswietlaczu
+ int i_hour = sprintf(buff, "%d:", tm.Hour);         //sprawdzanie warunkow wyswietlania
    if (i_hour<3){
    i_hour = sprintf(buff, "0%d:", tm.Hour);
    }
- lcd.print(buff);
+ lcd.print(buff);                                    
       int i_minute = sprintf(buff, "%d", tm.Minute);
          if (i_minute<2){
          i_hour = sprintf(buff, "0%d", tm.Minute);
          }
-      lcd.print(buff);
+      lcd.print(buff);                               //wyswietlanie aktualnej godziny na wyswietlaczu
       
  lcd.setCursor(0,1);
  sprintf(buff, "%d/%d/%d", tm.Day, tm.Month, tm.Year-30);
@@ -242,16 +247,16 @@ void lcdscreen()
         }
      lcd.print(buff);
            sprintf(buff, "%d", tm.Year-30);
-           lcd.print(buff );
+           lcd.print(buff );                          //wyswietlanie aktualnej daty na wyswietlaczu
            
 lcd.setCursor(10,0);
-lcd.print(sensor.readTemperature(),1);
+lcd.print(sensor.readTemperature(),1);                //wyswietlanie aktualnej temperatury na wyswietlaczu
 lcd.setCursor(14, 0);
-lcd.print((char)223);
+lcd.print((char)223);                                 //wyswietlanie znaku stopni na wyswietlaczu
 lcd.setCursor(15, 0);
 lcd.print("C");
 lcd.setCursor(10,1);
-lcd.print(sensor.readHumidity(),1);
+lcd.print(sensor.readHumidity(),1);                   //wyswietlanie aktualnej wilgotnosci na wyswietlaczu
 lcd.setCursor(15, 1);
 lcd.print("%");     
 }
@@ -259,106 +264,151 @@ lcd.print("%");
 
 //*************************************          DHT21 SENSOR          **************************************
 
-void read_SensorDHT21()
+void read_SensorDHT21()                               //funkcja odczytu danych z czujnika DHT21
 {
  TxFrame.values.temperature = sensor.readTemperature();     //przypisz zmiennej temperatura odczyt temperatury powietrza
  TxFrame.values.humidity = sensor.readHumidity();           //przypisz zmiennej wilgotnosc odczyt wilgotnosci powietrza
 }
 
+//*************************************          NIGHT LIGHTNING          **************************************
+
+void turnOn_NightLight()                              //funkcja kontrolowania oswietlenia nocnego
+{
+  lightsensorvalue = analogRead(LIGHTSENSORPIN);      //odczyt natezenia swiatla z fotorezystora              
+  
+  if (lightsensorvalue < lightintensity) {
+     digitalWrite(DIODEPIN, HIGH);                    //wlaczenie diody    
+  } 
+  else {
+     digitalWrite(DIODEPIN, LOW);                     //wylaczenie diody      
+  }
+}
+
+
+//*************************************          BULB DIODE          **************************************
+
+void toggle_BulbDiode()                               //funkcja sygnalizacji stanu pracy zarowki grzewczej
+{
+  byte bulbstatus=check_Byte(7, relay);               //przypisanie bitu odpowiedzialnego za prace zarowki do zmiennej 
+  if (bulbstatus==0) {                                //prawdzenie warunku pracy
+     digitalWrite(DIODEPIN, HIGH);                    //wlaczenie diody    
+  } 
+  else {
+     digitalWrite(DIODEPIN, LOW);                     //wylaczenie diody      
+  }
+}
 
 //*************************************          LED STRIPES          **************************************
 
-void ledfade()
+void led_Fade()                                       //funkcja symulowania zmierzchu za pomoca oswietlenia 
 {
- analogWrite(LEDPIN, pulsewidth); //Generujemy sygnał o zadanym wypełnieniu
+ analogWrite(LEDPIN, pulsewidth);                     //generowanie sygnalu o zadanym wypelnieniu
  
- if (pulsewidth > 0) { //Jeśli wypełnienie wieksze od 0%
- pulsewidth = pulsewidth - change; //Zmniejszamy wypełnienie
+ if (pulsewidth > 0) {                                //jesli wypelnienie wieksze od 0%
+ pulsewidth = pulsewidth - change;                    //zmniejszamy wypelnienie
  } else {
- pulsewidth = 0; //Jeśli wypełnienie rowne 0% to zatrzymaj zmiany
+ pulsewidth = 0;                                      //jesli wypelnienie rowne 0% to zatrzymaj zmiany
  }
- delay(ledtime); //Małe opóźnienie, aby efekt był widoczny
+ delay(ledtime);                                      //zadeklarowany okres zmian jasnosci
 }
 
-void ledbright()
+void led_Bright()                                     //funkcja symulowania switu za pomoca oswietlenia
 {
- analogWrite(LEDPIN, pulsewidth); //Generujemy sygnał o zadanym wypełnieniu
+ analogWrite(LEDPIN, pulsewidth);                     //generowanie sygnalu o zadanym wypelnieniu
  
- if (pulsewidth < maxledbright) { //Jeśli wypełnienie mniejsze od 100%
- pulsewidth = pulsewidth + change; //Zwiększamy wypełnienie
+ if (pulsewidth < maxledbright) {                     //jesli wypelnienie mniejsze od maksymalnego zadeklarowanego
+ pulsewidth = pulsewidth + change;                    //zwiekszamy wypelnienie
  } else {
- pulsewidth = 0; //Jeśli wypełnienie większe od 100%, to wracamy na początek
+ pulsewidth = maxledbright;                           //jesli wypelnienie wieksze od zadeklarowanego to pozostaw wartosc maksymalna
  }
- delay(ledtime); //Małe opóźnienie, aby efekt był widoczny
+ delay(ledtime);                                      //zadeklarowany okres zmian jasnosci
 }
 
 
 //*************************************          PWM FAN          **************************************
 
-void set_fan_speed(uint8_t duty_cycle)
+void set_Fan_Speed(uint8_t duty_cycle)                //funkcja ustawiania wypelnienia sygnalu wentylatora
 {
  if (duty_cycle > 0 && duty_cycle < 80) {
      OCR2B = duty_cycle;
  }
 }
 
-char getRPMS() 
+char get_RPMS()                                       //funkcja odczytu predkosci wentylatora
 {
- time = pulseIn(RPMPIN, HIGH);
- rpmfan = (1000000 * 60) / (time * 4);
- stringRPM = String(rpmfan);
- //if (stringRPM.length() < 5) {
-   Serial.println(rpmfan, DEC);
-// }
+ time = pulseIn(RPMPIN, HIGH);                        //odczyt okresu tetnienia
+ rpmfan = (1000000 * 60) / (time * 4);                //zamiana odczytu na predkosc wentylatora
+ stringRPM = String(rpmfan);                          //zapis predkosci do zmiennej tekstowej
+ Serial.println(rpmfan, DEC);                         //wyswietlenie predkosci wentylatora na monitorze portu szeregowego
 }
 
-void fanaccelerate()
+void fan_Accelerate()                                 //funkcja zwiekszania predkosci obrotow wentylatora
 {
- speeddutycycle+=10;
+ speeddutycycle+=10;                                  //zwiekszenie wypelnienia
  if (speeddutycycle > 0 && speeddutycycle < 80) {
      OCR2B = speeddutycycle;  
  }
 }
 
-void fanslowdown()
+void fan_SlowDown()                                   //funkcja zmniejszania predkosci obrotow wentylatora
 {
- speeddutycycle-=10;
+ speeddutycycle-=10;                                  //zmniejszenie wypelnienia
  if (speeddutycycle > 0 && speeddutycycle < 80) {
      OCR2B = speeddutycycle;  
  }
 }
 
-void togglefan()
+void toggle_Fan()                                     //funkcja wlaczania/wylaczania wentylatora
 {                  
-  togglebyte(FANRELAY, relay);            //stan wysoki na bicie
+  toggle_Byte(FANRELAY, relay);                       //zmiana stanu na bicie odpowiedzialnym za wentylator
+  hc595(relay);                                       //ustawienie rejestru przesuwnego
+}
+
+ 
+//*************************************          HEAT BULB          **************************************
+
+void lightOn_Bulb()                                   //funkcja wlaczania zarowki grzewczej
+{
+  clear_Byte(BULBRELAY, relay);                       //stan niski na bicie odpowiedzialnym za zarowke
   hc595(relay);
 }
- 
+
+void lightOff_Bulb()                                  //funkcja wylaczania zarowki grzewczej
+{                  
+  set_Byte(BULBRELAY, relay);                         //stan wysoki na bicie odpowiedzialnym za zarowke
+  hc595(relay);
+}
+
+void toggle_Bulb()                                    //funkcja wlaczania/wylaczania zarowki grzewczej
+{                  
+  toggle_Byte(BULBRELAY, relay);                      //zmiana stanu na bicie odpowiedzialnym za zarowke
+  hc595(relay);
+}
 
 
 //*************************************          SERIAL MONITOR          **************************************
 
-void printsensor()
+void print_Sensor()                                   //funkcja wyswietlajaca odczyt czujnika DHT21 na monitorze portu szeregowego
 {
-Serial.print(TxFrame.values.temperature);
+Serial.print(TxFrame.values.temperature);             //wyswietl temperature
 Serial.print(" ");
-Serial.println(TxFrame.values.humidity);
-}
+Serial.println(TxFrame.values.humidity);              //wyswietl wilgotnosc
+} 
 
-void printclock()
+void print_Clock()                                    //funkcja wyswietlajaca czas i date zegara na monitorze portu szeregowego
 {
 bool parse=false;
 bool config=false;
        
-if (parse && config) {
+if (parse && config) {                                //sprawdzenie poprawnosci konfiguracji zegara
   Serial.print("DS1307 configured Time=");
-  Serial.print(tm.Hour);
+  Serial.print(tm.Hour);                              //wyswietlanie godziny konfiguracji zegara
   Serial.print(":");
   Serial.print(tm.Minute);
   Serial.print(":");
   Serial.print(tm.Second);
   
-  Serial.print(", Date=");
+  Serial.print(", Date=");                            //wyswietlanie daty konfiguracji zegara
   Serial.print(tm.Day);
   Serial.print(".");
   Serial.print(tm.Month);
@@ -366,18 +416,18 @@ if (parse && config) {
   Serial.print(1970+tm.Year);
 } 
 else if (parse) {
-  Serial.println("DS1307 Communication Error :-{");
+  Serial.println("DS1307 Communication Error :-{");   //wyswietlanie komunikatu w przypadku niepoprawnej konfiguracji zegara
   Serial.println("Please check your circuitry");
 } 
 else {
-  Serial.print("Time=\"");
+  Serial.print("Time=\"");                            //wyswietlanie akualnej godziny
   Serial.print(tm.Hour);
   Serial.print(":");
   Serial.print(tm.Minute);
   Serial.print(":");
   Serial.print(tm.Second);
   
-  Serial.print("\", Date=\"");
+  Serial.print("\", Date=\"");                        //wyswietlanie aktualnej daty
   Serial.print(tm.Day);
   Serial.print(".");
   Serial.print(tm.Month);
@@ -387,73 +437,52 @@ else {
 }
 }
 
-void readserial()
+void read_Serial()                                    //funkcja sterowania odczytami monitora portu szeregoego
 {
-byte incomingByte=0;
-incomingByte = Serial.read(); 
+byte incomingByte=0;                                  //zmienna wysylanych danych do portu
+incomingByte = Serial.read();                         //przypisanie odczytu portu do zmiennej
     
-if (incomingByte == '1') {
+if (incomingByte == '1') {                            //jezeli wyslano 1 to wyswietl odczyt czujnika DHT21
   read_SensorDHT21();
   Serial.print("Odczyt czujnika DHT: ");
-  printsensor();
+  print_Sensor();
 }
 
-if (incomingByte == '2') {
+if (incomingByte == '2') {                            //jezeli wyslano 2 to wyswietl aktualna godzine i date z zegara
   RTC.read(tm);
   Serial.print("Odczyt zegara: ");
-  printclock();
+  print_Clock();
 }
 
-if (incomingByte == '3') {
-togglebulb();
+if (incomingByte == '3') {                            //jezeli wyslano 3 to zmien stan pracy zarowki grzewczej
+toggle_Bulb();
 Serial.println("Zmieniono stan pracy zarowki");
 }
 
-if (incomingByte == '4') {
-togglefan();
+if (incomingByte == '4') {                            //jezeli wyslano 4 to zmien stan pracy wiatraka    
+toggle_Fan();
 Serial.println("Zmieniono stan pracy wiatraka");
 }
 
-if (incomingByte == '5') {
-fanaccelerate();
+if (incomingByte == '5') {                             //jezeli wyslano 5 to zwieksz obroty wiatraka
+fan_Accelerate();
 Serial.println("Zwiekszono obroty wiatraka");
 }
 
-if (incomingByte == '6') {
-fanslowdown();
+if (incomingByte == '6') {                             //jezeli wyslano 6 to zmniejsz obroty wiatraka
+fan_SlowDown();
 Serial.println("Zmniejszono obroty wiatraka");
 }
 
 }
 
 
-//*************************************          HEAT BULB          **************************************
-
-void lightonbulb()
-{
-  clearbyte(BULBRELAY, relay);          //stan niski na bicie
-  hc595(relay);
-}
-
-void lightoffbulb()
-{                  
-  setbyte(BULBRELAY, relay);            //stan wysoki na bicie
-  hc595(relay);
-}
-
-void togglebulb()
-{                  
-  togglebyte(BULBRELAY, relay);            //stan wysoki na bicie
-  hc595(relay);
-}
-
-
 //*************************************          MAIN LOOP          **************************************
 
-void loop() 
+void loop()                                            //petla glowna programu
 {
   RTC.read(tm);
-  lcdscreen();
-  ledbright();
-  if (Serial.available()>0) readserial();
+  lcdDisplay();
+  led_Bright();
+  if (Serial.available()>0) read_Serial();
 }
