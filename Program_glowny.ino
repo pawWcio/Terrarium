@@ -212,9 +212,9 @@ bool getDate(const char *str)
 }
 
 
-//*************************************          LCD          **************************************
+//*************************************          LCD SCREEN         **************************************
 
-void lcdread()
+void lcdscreen()
 {
  char buff [16];
  lcd.setCursor(0,0);
@@ -250,7 +250,7 @@ lcd.setCursor(14, 0);
 lcd.print((char)223);
 lcd.setCursor(15, 0);
 lcd.print("C");
-lcd.setCursor(11,1);
+lcd.setCursor(10,1);
 lcd.print(sensor.readHumidity(),1);
 lcd.setCursor(15, 1);
 lcd.print("%");     
@@ -394,37 +394,34 @@ incomingByte = Serial.read();
     
 if (incomingByte == '1') {
   read_SensorDHT21();
+  Serial.print("Odczyt czujnika DHT: ");
   printsensor();
 }
 
 if (incomingByte == '2') {
   RTC.read(tm);
+  Serial.print("Odczyt zegara: ");
   printclock();
 }
 
+if (incomingByte == '3') {
+togglebulb();
+Serial.println("Zmieniono stan pracy zarowki");
+}
+
 if (incomingByte == '4') {
-lightonbulb();
+togglefan();
+Serial.println("Zmieniono stan pracy wiatraka");
 }
 
 if (incomingByte == '5') {
-lightoffbulb();
+fanaccelerate();
+Serial.println("Zwiekszono obroty wiatraka");
 }
-
 
 if (incomingByte == '6') {
-togglebulb();
-}
-
-if (incomingByte == '7') {
-togglefan();
-}
-
-if (incomingByte == '8') {
-fanaccelerate();
-}
-
-if (incomingByte == '9') {
 fanslowdown();
+Serial.println("Zmniejszono obroty wiatraka");
 }
 
 }
@@ -456,7 +453,7 @@ void togglebulb()
 void loop() 
 {
   RTC.read(tm);
-  lcdread();
+  lcdscreen();
   ledbright();
   if (Serial.available()>0) readserial();
 }
