@@ -9,7 +9,7 @@
 
 //*************************************          DEFINITIONS          **************************************
 
-//#define PIRPIN            2                         //deklaracja pinu czujnika ruchu PIR
+#define PIRPIN            2                         //deklaracja pinu czujnika ruchu PIR
 #define LEDPIN            5                         //deklaracja pinu taśm LED
 #define RPMPIN            4                         //deklaracja pinu odczytu predkosci wentylatora   
 #define PWMPIN            3                         //deklaracja pinu sterujacego PWM wentylatora
@@ -32,12 +32,12 @@ int change = 5;                                     //zmiana poziomu swiecenia t
 int maxledbright = 255;                             //maksymalna jasnosc swiecenia tasmy LED
 byte relay = 255;                                   //domyslna wartosc przekaznikow (255 wszystkie wylaczone)                                         
 unsigned long time;                                 //zmienna okresu wentylatora
-unsigned int rpmfan;                                   //zmienna predkosci obrotow wentylatora
+unsigned int rpmfan;                                //zmienna predkosci obrotow wentylatora
 String stringRPM;                                   //predkosc obrotow wentylatora zapisana w ciagu znakow
 
 int pwmPin     = 3; // digital PWM pin 9
 int pwmVal     = 1; // The PWM Value
-int speeddutycycle = 0;
+int speeddutycycle = 0;                             //wypelnienie sygnalu wentylatora (w zakresie od 0-80)
 
 
 
@@ -80,7 +80,7 @@ void setup()                                        //funkcja konfiguracyjna
   pinMode(LEDPIN,   OUTPUT);                        //ustawienie pinu tasmy LED jako wyjscie
   pinMode(PWMPIN,   OUTPUT);                        //ustawienie pinu sterowania PWM wentylatora jako wyjscie
   
-//  pinMode(PIRPIN,   INPUT);                         //ustawienie pinu czujnika PIR jako wejscie
+  pinMode(PIRPIN,   INPUT);                         //ustawienie pinu czujnika PIR jako wejscie
   pinMode(RPMPIN,   INPUT);                         //ustawienie pinu odczytu predkosci wentylatora jako wejscie
   
   hc595(relay);                                     //ustawienie wyjsc rejestru przesuwnego na zadeklarowana wczesniej wartosc
@@ -96,7 +96,7 @@ void setup()                                        //funkcja konfiguracyjna
   TCCR2B = 0x0A;                                    //ustawienie prescalera (WGM21, Prescaler =/8)
   OCR2A = 79;                                       //ustawienie najwyzszej wartosci, od ktorej bedzie odliczane w dol (ustawia wypelnienie PWM- nie zmieniac!)
   OCR2B = 0;                                        //ustawienie wartosci PWM (0-79)
-// digitalWrite(RPMPIN, HIGH);                      //odczyt redkosci wentylatora
+// digitalWrite(RPMPIN, HIGH);                      //odczyt predkosci wentylatora
 
 
 
@@ -216,26 +216,44 @@ bool getDate(const char *str)
 
 void lcdread()
 {
-      char buff [16];
-        sprintf(buff, "%d/%d/%d", tm.Day, tm.Month, 1970+tm.Year);
-        lcd.setCursor(0,0);
-        lcd.print(buff );
-        lcd.setCursor(0,1);
-        int i_hour = sprintf(buff, "%d:", tm.Hour);
-        if (i_hour<3){
-        i_hour = sprintf(buff, "0%d:", tm.Hour);
+ char buff [16];
+ lcd.setCursor(0,0);
+ int i_hour = sprintf(buff, "%d:", tm.Hour);
+   if (i_hour<3){
+   i_hour = sprintf(buff, "0%d:", tm.Hour);
+   }
+ lcd.print(buff);
+      int i_minute = sprintf(buff, "%d", tm.Minute);
+         if (i_minute<2){
+         i_hour = sprintf(buff, "0%d", tm.Minute);
+         }
+      lcd.print(buff);
+      
+ lcd.setCursor(0,1);
+ sprintf(buff, "%d/%d/%d", tm.Day, tm.Month, tm.Year-30);
+ int i_day = sprintf(buff, "%d/", tm.Day);
+   if (i_day<3){
+   i_hour = sprintf(buff, "0%d/", tm.Day);
+   }
+ lcd.print(buff);
+     int i_month = sprintf(buff, "%d/", tm.Month);
+        if (i_month<3){
+        i_hour = sprintf(buff, "0%d/", tm.Month);
         }
-        lcd.print(buff);
-              int i_minute = sprintf(buff, "%d:", tm.Minute);
-              if (i_minute<3){
-              i_hour = sprintf(buff, "0%d:", tm.Minute);
-              }
-              lcd.print(buff);
-                        int i_second = sprintf(buff, "%d", tm.Second);
-                        if (i_second<2){
-                        i_hour = sprintf(buff, "0%d", tm.Second);
-                        }
-                        lcd.print(buff);
+     lcd.print(buff);
+           sprintf(buff, "%d", tm.Year-30);
+           lcd.print(buff );
+           
+lcd.setCursor(10,0);
+lcd.print(sensor.readTemperature(),1);
+lcd.setCursor(14, 0);
+lcd.print((char)223);
+lcd.setCursor(15, 0);
+lcd.print("C");
+lcd.setCursor(11,1);
+lcd.print(sensor.readHumidity(),1);
+lcd.setCursor(15, 1);
+lcd.print("%");     
 }
 
 
@@ -294,14 +312,19 @@ char getRPMS()
 // }
 }
 
-void fan()
+void fanaccelerate()
 {
- 
  speeddutycycle+=10;
  if (speeddutycycle > 0 && speeddutycycle < 80) {
-     OCR2B = speeddutycycle;
-     
-     
+     OCR2B = speeddutycycle;  
+ }
+}
+
+void fanslowdown()
+{
+ speeddutycycle-=10;
+ if (speeddutycycle > 0 && speeddutycycle < 80) {
+     OCR2B = speeddutycycle;  
  }
 }
 
@@ -377,34 +400,32 @@ if (incomingByte == '1') {
 if (incomingByte == '2') {
   RTC.read(tm);
   printclock();
-
 }
 
 if (incomingByte == '4') {
 lightonbulb();
-
 }
 
 if (incomingByte == '5') {
 lightoffbulb();
-
 }
 
 
 if (incomingByte == '6') {
 togglebulb();
-
 }
 
 if (incomingByte == '7') {
 togglefan();
-
 }
 
 if (incomingByte == '8') {
-fan();
+fanaccelerate();
 }
 
+if (incomingByte == '9') {
+fanslowdown();
+}
 
 }
 
