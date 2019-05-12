@@ -9,19 +9,23 @@
 
 //*************************************          DEFINITIONS          **************************************
 
-#define PIRPIN            2                         //deklaracja pinu czujnika ruchu PIR
 #define LEDPIN            5                         //deklaracja pinu taśm LED
 #define RPMPIN            4                         //deklaracja pinu odczytu predkosci wentylatora   
 #define PWMPIN            3                         //deklaracja pinu sterujacego PWM wentylatora
 #define DATAPIN           7                         //deklaracja pinu ustawiającego dane rejestru przesuwnego
-#define DIODEPIN          8                         //deklaracja pinu diody LED
-#define DIODEBULBPIN      13                        //deklaracja pinu diody sygnalizujacego prace zarowki
+#define DIODEFOGGERPIN    8                         //deklaracja pinu diody sygnalizujacej prace generatora mgly
+#define RGBDIODEREDPIN    9                         //deklaracja pinu koloru czerwonego diody RGB
+#define RGBDIODEGREENPIN  10                        //deklaracja pinu koloru zielonego diody RGB
+#define RGBDIODEBLUEPIN   11                        //deklaracja pinu koloru niebieskiego diody RGB
+#define DIODEBULBPIN      12                        //deklaracja pinu diody sygnalizujacej prace zarowki
+#define PIRPIN            13                        //deklaracja pinu czujnika ruchu PIR
 #define LATCHPIN          A0                        //deklaracja pinu zatrzasku rejestru przesuwnego
 #define CLOCKPIN          A1                        //deklaracja pinu przesuwającego rejestru przesuwnego
 #define SENSORDHT21PIN    A2                        //deklaracja pinu czujnika temperatury i wilgotnosci
 #define LIGHTSENSORPIN    A5                        //deklaracja pinu czujnika natezenia swiatla
 
 #define FANRELAY          0                         //deklaracja numeru bitu odpowiedzialnego za wentylator
+#define FOGGERRELAY       1                         //deklaracja numeru bitu odpowiedzialnego za generator mgly
 #define BULBRELAY         7                         //deklaracja numeru bitu odpowiedzialnego za zarowke
 #define TXFRAMESIZE       8                         //deklaracja rozmiaru ramki
 #define SERIALSPEED       9600                      //deklaracja prędkości transmisji portu szeregowego
@@ -79,15 +83,20 @@ union send_frame TxFrame;                           //ramka transmiji danych
  
 void setup()                                        //funkcja konfiguracyjna
 {
-  pinMode(DATAPIN,        OUTPUT);                  //ustawienie pinu danych rejestru jako wyjscie
-  pinMode(CLOCKPIN,       OUTPUT);                  //ustawienie pinu zegarowego rejestru jako wyjscie
-  pinMode(LATCHPIN,       OUTPUT);                  //ustawienie pinu zatrzasku rejestru jako wyjscie
-  pinMode(LEDPIN,         OUTPUT);                  //ustawienie pinu tasmy LED jako wyjscie
-  pinMode(PWMPIN,         OUTPUT);                  //ustawienie pinu sterowania PWM wentylatora jako wyjscie
-  pinMode(LIGHTSENSORPIN, OUTPUT);                  //ustawienie pinu czujnika natezenia swiatla jako wyjscie    
+  pinMode(DATAPIN,          OUTPUT);                //ustawienie pinu danych rejestru jako wyjscie
+  pinMode(CLOCKPIN,         OUTPUT);                //ustawienie pinu zegarowego rejestru jako wyjscie
+  pinMode(LATCHPIN,         OUTPUT);                //ustawienie pinu zatrzasku rejestru jako wyjscie
+  pinMode(LEDPIN,           OUTPUT);                //ustawienie pinu tasmy LED jako wyjscie
+  pinMode(PWMPIN,           OUTPUT);                //ustawienie pinu sterowania PWM wentylatora jako wyjscie
+  pinMode(LIGHTSENSORPIN,   OUTPUT);                //ustawienie pinu czujnika natezenia swiatla jako wyjscie    
+  pinMode(RGBDIODEREDPIN,   OUTPUT);                //ustawienie pinu koloru czerwonego diody RGB jako wyjscie
+  pinMode(RGBDIODEGREENPIN, OUTPUT);                //ustawienie pinu koloru zielonego diody RGB jako wyjscie
+  pinMode(RGBDIODEBLUEPIN,  OUTPUT);                //ustawienie pinu koloru niebieskiego diody RGB jako wyjscie
+  pinMode(DIODEFOGGERPIN,   OUTPUT);                //ustawienie pinu diody generatora mgly jako wyjscie
+  pinMode(DIODEBULBPIN,     OUTPUT);                //ustawienie pinu diody zarowki grzewczej jako wyjscie  
   
-  pinMode(PIRPIN,         INPUT);                   //ustawienie pinu czujnika PIR jako wejscie
-  pinMode(RPMPIN,         INPUT);                   //ustawienie pinu odczytu predkosci wentylatora jako wejscie
+  pinMode(PIRPIN,           INPUT);                 //ustawienie pinu czujnika PIR jako wejscie
+  pinMode(RPMPIN,           INPUT);                  //ustawienie pinu odczytu predkosci wentylatora jako wejscie
   
   hc595(relay);                                     //ustawienie wyjsc rejestru przesuwnego na zadeklarowana wczesniej wartosc
 
@@ -102,6 +111,9 @@ void setup()                                        //funkcja konfiguracyjna
   TCCR2B = 0x0A;                                    //ustawienie prescalera (WGM21, Prescaler =/8)
   OCR2A = 79;                                       //ustawienie najwyzszej wartosci wypelnienia PWM, od ktorej bedzie odliczane w dol
   OCR2B = 0;                                        //ustawienie najnizszej wartosci wypelnienia PWM, od ktorej bedzie odliczane w gore
+  analogWrite(RGBDIODEREDPIN, 0);  
+  analogWrite(RGBDIODEGREENPIN, 0);
+  analogWrite(RGBDIODEBLUEPIN, 0);
 // digitalWrite(RPMPIN, HIGH);                      //odczyt predkosci wentylatora
 
 
@@ -276,11 +288,11 @@ void turnOn_NightLight()                              //funkcja kontrolowania os
 {
   lightsensorvalue = analogRead(LIGHTSENSORPIN);      //odczyt natezenia swiatla z fotorezystora              
   
-  if (lightsensorvalue < lightintensity) {
-     digitalWrite(DIODEPIN, HIGH);                    //wlaczenie diody    
+  if (lightsensorvalue < lightintensity && digitalRead(PIRPIN) == LOW) {
+     digitalWrite(DIODEBULBPIN, HIGH);                //wlaczenie diody    
   } 
   else {
-     digitalWrite(DIODEPIN, LOW);                     //wylaczenie diody      
+     digitalWrite(DIODEBULBPIN, LOW);                 //wylaczenie diody      
   }
 }
 
@@ -289,14 +301,72 @@ void turnOn_NightLight()                              //funkcja kontrolowania os
 
 void toggle_BulbDiode()                               //funkcja sygnalizacji stanu pracy zarowki grzewczej
 {
-  byte bulbstatus=check_Byte(7, relay);               //przypisanie bitu odpowiedzialnego za prace zarowki do zmiennej 
-  if (bulbstatus==0) {                                //prawdzenie warunku pracy
-     digitalWrite(DIODEPIN, HIGH);                    //wlaczenie diody    
+  byte bulbstatus = check_Byte(BULBRELAY, relay);     //przypisanie bitu odpowiedzialnego za prace zarowki do zmiennej 
+  if (bulbstatus == 0) {                              //sprawdzenie warunku pracy
+     digitalWrite(DIODEBULBPIN, HIGH);                //wlaczenie diody    
   } 
   else {
-     digitalWrite(DIODEPIN, LOW);                     //wylaczenie diody      
+     digitalWrite(DIODEBULBPIN, LOW);                 //wylaczenie diody      
   }
 }
+
+//*************************************          FOGGER DIODE          **************************************
+
+void toggle_FoggerDiode()                             //funkcja sygnalizacji stanu pracy zarowki grzewczej
+{
+  byte foggerstatus = check_Byte(FOGGERRELAY, relay); //przypisanie bitu odpowiedzialnego za prace zarowki do zmiennej 
+  if (foggerstatus == 0) {                            //sprawdzenie warunku pracy
+     digitalWrite(DIODEFOGGERPIN, HIGH);              //wlaczenie diody    
+  } 
+  else {
+     digitalWrite(DIODEFOGGERPIN, LOW);               //wylaczenie diody      
+  }
+}
+
+//*************************************          RGB DIODE          **************************************
+    
+void rgb_RedColor(){
+    analogWrite(RGBDIODEREDPIN, 255);  
+    analogWrite(RGBDIODEGREENPIN, 0);
+    analogWrite(RGBDIODEBLUEPIN, 0);
+}
+
+void rgb_OrangeColor(){
+    analogWrite(RGBDIODEREDPIN, 255);  
+    analogWrite(RGBDIODEGREENPIN, 165);
+    analogWrite(RGBDIODEBLUEPIN, 0);
+}
+
+void rgb_YellowColor(){
+    analogWrite(RGBDIODEREDPIN, 255);  
+    analogWrite(RGBDIODEGREENPIN, 255);
+    analogWrite(RGBDIODEBLUEPIN, 0);
+}
+
+void rgb_GreenColor(){
+    analogWrite(RGBDIODEREDPIN, 0);  
+    analogWrite(RGBDIODEGREENPIN, 255);
+    analogWrite(RGBDIODEBLUEPIN, 0);
+}
+
+void rgb_BlueColor(){
+    analogWrite(RGBDIODEREDPIN, 0);  
+    analogWrite(RGBDIODEGREENPIN, 0);
+    analogWrite(RGBDIODEBLUEPIN, 255);
+}
+
+void rgb_PurpleColor(){
+    analogWrite(RGBDIODEREDPIN, 255);  
+    analogWrite(RGBDIODEGREENPIN, 0);
+    analogWrite(RGBDIODEBLUEPIN, 255);
+}
+
+void rgb_TurquoiseColor(){
+    analogWrite(RGBDIODEREDPIN, 0);  
+    analogWrite(RGBDIODEGREENPIN, 255);
+    analogWrite(RGBDIODEBLUEPIN, 255);
+}
+
 
 //*************************************          LED STRIPES          **************************************
 
@@ -385,6 +455,26 @@ void toggle_Bulb()                                    //funkcja wlaczania/wylacz
   hc595(relay);
 }
 
+//*************************************          FOGGER          **************************************
+
+void lightOn_Fogger()                                   //funkcja wlaczania generatora mgly
+{
+  clear_Byte(FOGGERRELAY, relay);                       //stan niski na bicie odpowiedzialnym za generator mgly
+  hc595(relay);
+}
+
+void lightOff_Fogger()                                  //funkcja wylaczania generatora mgly
+{                  
+  set_Byte(FOGGERRELAY, relay);                         //stan wysoki na bicie odpowiedzialnym za generator mgly
+  hc595(relay);
+}
+
+void toggle_Fogger()                                    //funkcja wlaczania/wylaczania generatora mgly
+{                  
+  toggle_Byte(FOGGERRELAY, relay);                      //zmiana stanu na bicie odpowiedzialnym za generator mgly
+  hc595(relay);
+}
+
 
 //*************************************          SERIAL MONITOR          **************************************
 
@@ -464,12 +554,17 @@ toggle_Fan();
 Serial.println("Zmieniono stan pracy wiatraka");
 }
 
-if (incomingByte == '5') {                             //jezeli wyslano 5 to zwieksz obroty wiatraka
+if (incomingByte == '5') {                            //jezeli wyslano 5 to zmien stan pracy generatora mgly  
+toggle_Fogger();
+Serial.println("Zmieniono stan pracy wiatraka");
+}
+
+if (incomingByte == '6') {                             //jezeli wyslano 6 to zwieksz obroty wiatraka
 fan_Accelerate();
 Serial.println("Zwiekszono obroty wiatraka");
 }
 
-if (incomingByte == '6') {                             //jezeli wyslano 6 to zmniejsz obroty wiatraka
+if (incomingByte == '7') {                             //jezeli wyslano 7 to zmniejsz obroty wiatraka
 fan_SlowDown();
 Serial.println("Zmniejszono obroty wiatraka");
 }
@@ -484,5 +579,8 @@ void loop()                                            //petla glowna programu
   RTC.read(tm);
   lcdDisplay();
   led_Bright();
+  turnOn_NightLight();
+  toggle_BulbDiode();
+  toggle_FoggerDiode();
   if (Serial.available()>0) read_Serial();
 }
