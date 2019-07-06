@@ -9,9 +9,11 @@
 
 //*************************************          DEFINITIONS          **************************************
 
-#define LEDPIN            5                         //deklaracja pinu taśm LED
-#define RPMPIN            4                         //deklaracja pinu odczytu predkosci wentylatora   
+#define SENSORDHT21PIN    2                        //deklaracja pinu czujnika temperatury i wilgotnosci
 #define PWMPIN            3                         //deklaracja pinu sterujacego PWM wentylatora
+#define RPMPIN            4                         //deklaracja pinu odczytu predkosci wentylatora  
+#define LEDPIN            5                         //deklaracja pinu taśm LED 
+#define BUTTONPIN         6                         //deklaracja pinu przycisku włączającego generator mgły manualnie
 #define DATAPIN           7                         //deklaracja pinu ustawiającego dane rejestru przesuwnego
 #define DIODEFOGGERPIN    8                         //deklaracja pinu diody sygnalizujacej prace generatora mgly
 #define RGBDIODEREDPIN    9                         //deklaracja pinu koloru czerwonego diody RGB
@@ -21,7 +23,6 @@
 #define PIRPIN            13                        //deklaracja pinu czujnika ruchu PIR
 #define LATCHPIN          A0                        //deklaracja pinu zatrzasku rejestru przesuwnego
 #define CLOCKPIN          A1                        //deklaracja pinu przesuwającego rejestru przesuwnego
-#define SENSORDHT21PIN    A2                        //deklaracja pinu czujnika temperatury i wilgotnosci
 #define LIGHTSENSORPIN    A5                        //deklaracja pinu czujnika natezenia swiatla
 
 #define FANRELAY          0                         //deklaracja numeru bitu odpowiedzialnego za wentylator
@@ -87,16 +88,17 @@ void setup()                                        //funkcja konfiguracyjna
   pinMode(CLOCKPIN,         OUTPUT);                //ustawienie pinu zegarowego rejestru jako wyjscie
   pinMode(LATCHPIN,         OUTPUT);                //ustawienie pinu zatrzasku rejestru jako wyjscie
   pinMode(LEDPIN,           OUTPUT);                //ustawienie pinu tasmy LED jako wyjscie
-  pinMode(PWMPIN,           OUTPUT);                //ustawienie pinu sterowania PWM wentylatora jako wyjscie
-  pinMode(LIGHTSENSORPIN,   OUTPUT);                //ustawienie pinu czujnika natezenia swiatla jako wyjscie    
+  pinMode(PWMPIN,           OUTPUT);                //ustawienie pinu sterowania PWM wentylatora jako wyjscie    
   pinMode(RGBDIODEREDPIN,   OUTPUT);                //ustawienie pinu koloru czerwonego diody RGB jako wyjscie
   pinMode(RGBDIODEGREENPIN, OUTPUT);                //ustawienie pinu koloru zielonego diody RGB jako wyjscie
   pinMode(RGBDIODEBLUEPIN,  OUTPUT);                //ustawienie pinu koloru niebieskiego diody RGB jako wyjscie
   pinMode(DIODEFOGGERPIN,   OUTPUT);                //ustawienie pinu diody generatora mgly jako wyjscie
   pinMode(DIODEBULBPIN,     OUTPUT);                //ustawienie pinu diody zarowki grzewczej jako wyjscie  
-  
+
+  pinMode(LIGHTSENSORPIN,   INPUT);                 //ustawienie pinu czujnika natezenia swiatla jako wejscie
   pinMode(PIRPIN,           INPUT);                 //ustawienie pinu czujnika PIR jako wejscie
-  pinMode(RPMPIN,           INPUT);                  //ustawienie pinu odczytu predkosci wentylatora jako wejscie
+  pinMode(BUTTONPIN,        INPUT);                 //ustawienie pinu przycisku jako wejscie
+  pinMode(RPMPIN,           INPUT);                 //ustawienie pinu odczytu predkosci wentylatora jako wejscie
   
   hc595(relay);                                     //ustawienie wyjsc rejestru przesuwnego na zadeklarowana wczesniej wartosc
 
@@ -569,6 +571,12 @@ fan_SlowDown();
 Serial.println("Zmniejszono obroty wiatraka");
 }
 
+if (incomingByte == '8') {                             //jezeli wyslano 8 to podaj odczyty stanów
+Serial.println(digitalRead(BUTTONPIN));
+Serial.println(digitalRead(PIRPIN));
+Serial.println(analogRead(LIGHTSENSORPIN));
+}
+
 }
 
 
@@ -577,6 +585,7 @@ Serial.println("Zmniejszono obroty wiatraka");
 void loop()                                            //petla glowna programu
 {
   RTC.read(tm);
+  read_Serial();
   lcdDisplay();
   led_Bright();
   turnOn_NightLight();
