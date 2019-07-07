@@ -9,7 +9,7 @@
 
 //*************************************          DEFINITIONS          **************************************
 
-#define SENSORDHT21PIN    2                        //deklaracja pinu czujnika temperatury i wilgotnosci
+#define SENSORDHT21PIN    2                         //deklaracja pinu czujnika temperatury i wilgotnosci
 #define PWMPIN            3                         //deklaracja pinu sterujacego PWM wentylatora
 #define RPMPIN            4                         //deklaracja pinu odczytu predkosci wentylatora  
 #define LEDPIN            5                         //deklaracja pinu taśm LED 
@@ -25,9 +25,10 @@
 #define CLOCKPIN          A1                        //deklaracja pinu przesuwającego rejestru przesuwnego
 #define LIGHTSENSORPIN    A5                        //deklaracja pinu czujnika natezenia swiatla
 
-#define FANRELAY          0                         //deklaracja numeru bitu odpowiedzialnego za wentylator
-#define FOGGERRELAY       1                         //deklaracja numeru bitu odpowiedzialnego za generator mgly
-#define BULBRELAY         7                         //deklaracja numeru bitu odpowiedzialnego za zarowke
+#define FOGGERFANRELAY    7                         //deklaracja numeru bitu odpowiedzialnego za wentylator
+#define FOGGERRELAY       6                         //deklaracja numeru bitu odpowiedzialnego za generator mgly
+#define NIGHTLEDRELAY     5                         //deklaracja numeru bitu odpowiedzialnego za oswietlenie nocne
+#define BULBRELAY         4                         //deklaracja numeru bitu odpowiedzialnego za zarowke
 #define TXFRAMESIZE       8                         //deklaracja rozmiaru ramki
 #define SERIALSPEED       9600                      //deklaracja prędkości transmisji portu szeregowego
 
@@ -36,9 +37,9 @@
 
 int pulsewidth = 0;                                 //wypelnienie sygnalu regulujacego jasnosc swiecenia ledow
 int ledtime = 100;                                  //okres zmian jasnosci swiecenia tasmy LED
-int change = 5;                                     //zmiana poziomu swiecenia tasmy LED
+int change = 25;                                    //zmiana poziomu swiecenia tasmy LED
 int maxledbright = 255;                             //maksymalna jasnosc swiecenia tasmy LED
-int lightsensorvalue = 0;                           //odczyt wartosci natezenia swiatla
+int lightsensorvalue = 900;                         //odczyt wartosci natezenia swiatla
 int lightintensity = 100;                           //zdeklarowany poziom wlaczenia oswietlenia nocnego
 byte relay = 255;                                   //domyslna wartosc przekaznikow (255 wszystkie wylaczone)                                         
 unsigned long time;                                 //zmienna okresu wentylatora
@@ -195,10 +196,11 @@ void set_time()                                     //funkcja konfigurujaca czas
     }
   }
 
-  Serial.begin(9600);                               //wlaczenie portu szeregowego
-  while (!Serial) ; // wait for serial
-  delay(200);
-  Serial.println("DS1307RTC Read Test");            //wyswietlenie informacji o poprawnej konfiguracji zegara
+//  Serial.begin(9600);                               //wlaczenie portu szeregowego
+//  while (!Serial) ; // wait for serial
+//  delay(200);
+
+  Serial.println("DS1307RTC Start");            //wyswietlenie informacji o poprawnej konfiguracji zegara
   Serial.println("-------------------");
 }
 
@@ -291,12 +293,21 @@ void turnOn_NightLight()                              //funkcja kontrolowania os
   lightsensorvalue = analogRead(LIGHTSENSORPIN);      //odczyt natezenia swiatla z fotorezystora              
   
   if (lightsensorvalue < lightintensity && digitalRead(PIRPIN) == LOW) {
-     digitalWrite(DIODEBULBPIN, HIGH);                //wlaczenie diody    
+       set_Byte(NIGHTLEDRELAY, relay);                //wlaczenie oswietlenia nocnego   
+       hc595(relay); 
   } 
   else {
-     digitalWrite(DIODEBULBPIN, LOW);                 //wylaczenie diody      
+       clear_Byte(NIGHTLEDRELAY, relay);              //wylaczenie oswietlenia nocnego 
+       hc595(relay);      
   }
 }
+
+void toggle_NightLight()                              //funkcja wlaczania/wylaczania oswietlenia nocnego
+{                  
+  toggle_Byte(NIGHTLEDRELAY, relay);                  //zmiana stanu na bicie odpowiedzialnym za oswietlenie nocne
+  hc595(relay);                                       //ustawienie rejestru przesuwnego
+}
+
 
 
 //*************************************          BULB DIODE          **************************************
@@ -396,6 +407,29 @@ void led_Bright()                                     //funkcja symulowania swit
  delay(ledtime);                                      //zadeklarowany okres zmian jasnosci
 }
 
+void led_Bright_Manual()                             //reczne rozjasnianie ledow     
+{
+ analogWrite(LEDPIN, pulsewidth);                    
+ 
+ if (pulsewidth < maxledbright) {                     
+ pulsewidth += change;                                
+ } else {
+ pulsewidth = maxledbright;                           
+ }
+}
+
+void led_Fade_Manual()                             //reczne sciemnianie ledow     
+{
+ analogWrite(LEDPIN, pulsewidth);                    
+ 
+ if (pulsewidth > 0) {                     
+ pulsewidth -= change;                                
+ } else {
+ pulsewidth = 0;                           
+ }
+}
+
+
 
 //*************************************          PWM FAN          **************************************
 
@@ -430,9 +464,9 @@ void fan_SlowDown()                                   //funkcja zmniejszania pre
  }
 }
 
-void toggle_Fan()                                     //funkcja wlaczania/wylaczania wentylatora
+void toggle_FoggerFan()                               //funkcja wlaczania/wylaczania wentylatora
 {                  
-  toggle_Byte(FANRELAY, relay);                       //zmiana stanu na bicie odpowiedzialnym za wentylator
+  toggle_Byte(FOGGERFANRELAY, relay);                 //zmiana stanu na bicie odpowiedzialnym za wentylator
   hc595(relay);                                       //ustawienie rejestru przesuwnego
 }
 
@@ -492,7 +526,7 @@ void print_Clock()                                    //funkcja wyswietlajaca cz
 bool parse=false;
 bool config=false;
        
-if (parse && config) {                                //sprawdzenie poprawnosci konfiguracji zegara
+if (true /*parse && config*/) {                                //sprawdzenie poprawnosci konfiguracji zegara
   Serial.print("DS1307 configured Time=");
   Serial.print(tm.Hour);                              //wyswietlanie godziny konfiguracji zegara
   Serial.print(":");
@@ -552,13 +586,13 @@ Serial.println("Zmieniono stan pracy zarowki");
 }
 
 if (incomingByte == '4') {                            //jezeli wyslano 4 to zmien stan pracy wiatraka    
-toggle_Fan();
+toggle_FoggerFan();
 Serial.println("Zmieniono stan pracy wiatraka");
 }
 
-if (incomingByte == '5') {                            //jezeli wyslano 5 to zmien stan pracy generatora mgly  
-toggle_Fogger();
-Serial.println("Zmieniono stan pracy wiatraka");
+if (incomingByte == '5') {                            //jezeli wyslano 5 to zmien stan pracy osiwetlenia nocnego  
+toggle_NightLight();
+Serial.println("Zmieniono stan pracy oswietlenia nocnego");
 }
 
 if (incomingByte == '6') {                             //jezeli wyslano 6 to zwieksz obroty wiatraka
@@ -571,10 +605,35 @@ fan_SlowDown();
 Serial.println("Zmniejszono obroty wiatraka");
 }
 
-if (incomingByte == '8') {                             //jezeli wyslano 8 to podaj odczyty stanów
+if (incomingByte == '8') {                             //jezeli wyslano 8 to zwieksz jasnosc ledow
+led_Bright_Manual();
+Serial.println("Zwiekszono jasnosc ledow");
+}
+
+if (incomingByte == '9') {                             //jezeli wyslano 9 to zmniejsz jasnosc ledow
+led_Fade_Manual();
+Serial.println("Zmniejszono jasnosc ledow");
+}
+
+if (incomingByte == '10') {                             //jezeli wyslano 10 to podaj odczyty stanów
 Serial.println(digitalRead(BUTTONPIN));
 Serial.println(digitalRead(PIRPIN));
 Serial.println(analogRead(LIGHTSENSORPIN));
+}
+
+if (incomingByte == 'b') {                             
+rgb_BlueColor();
+Serial.println("Kolor niebieski");
+}
+
+if (incomingByte == 'p') {                             
+rgb_PurpleColor();
+Serial.println("Kolor fioletowy");
+}
+
+if (incomingByte == 't') {                             
+rgb_TurquoiseColor();
+Serial.println("Kolor turkusowy");
 }
 
 }
@@ -586,9 +645,8 @@ void loop()                                            //petla glowna programu
 {
   RTC.read(tm);
   read_Serial();
+  hc595(relay);
   lcdDisplay();
-  led_Bright();
-  turnOn_NightLight();
   toggle_BulbDiode();
   toggle_FoggerDiode();
   if (Serial.available()>0) read_Serial();
