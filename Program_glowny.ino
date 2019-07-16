@@ -37,6 +37,8 @@
 
 float setpoint_temperature = 25;                    //zadana wartosc temperatury 
 float setpoint_humidity = 70;                       //zadana wartosc wilgotnosci
+float setpoint_temperature_histeresis = setpoint_temperature + 0.5;
+float setpoint_humidity_histeresis = setpoint_humidity + 5;             
 int pulsewidth = 0;                                 //wypelnienie sygnalu regulujacego jasnosc swiecenia ledow
 int ledtime = 100;                                  //okres zmian jasnosci swiecenia tasmy LED
 int change = 25;                                    //zmiana poziomu swiecenia tasmy LED
@@ -669,23 +671,27 @@ Serial.println(analogRead(LIGHTSENSORPIN));
 //*************************************       CONTROL ALGORITM      **************************************
 
 void control(){                                                     
+                 
+float actual_temperature=sensor.readTemperature();                                                                     
                                                                      //regulacja temperatury
-if(setpoint_temperature>=sensor.readTemperature()){                  //jezeli temperatura nizsza od zadanej
+if(setpoint_temperature>=actual_temperature){                  //jezeli temperatura nizsza od zadanej
   lightOn_Bulb();                                                    //wlaczenie zarowki grzewczej
   lightOn_BulbDiode();                                               //wlaczenie diody zarowki
 }
 
- if(setpoint_temperature+0.5<=sensor.readTemperature()){             //histereza 0.5 stopnia
+ if(setpoint_temperature_histeresis<=actual_temperature){             //histereza
   lightOff_Bulb();                                                   //wylaczenie zarowki grzewczej
   lightOff_BulbDiode();                                              //wylaczenie diody zarowki
 }
+           
+float actual_humidity=sensor.readHumidity();                                                                     
                                                                      //regulacja wilgotnosci
-if(setpoint_humidity>=sensor.readHumidity()){                        //jezeli wilgotnosc nizsza od zadanej
+if(setpoint_humidity>=actual_humidity){                                     //jezeli wilgotnosc nizsza od zadanej
   turnOn_Fogger();                                                   //wlaczenie generatora mgly
   lightOn_FoggerDiode();                                             //wlaczenie diody generatora
 }
 
- if(setpoint_humidity+5<=sensor.readHumidity()){                     //histereza 5 procent
+ if(setpoint_humidity_histeresis<=actual_humidity){                                  //histereza
   turnOff_Fogger();                                                  //wylaczenie generatora
   lightOff_FoggerDiode();                                            //wylaczenie diody generatora
 }
@@ -701,6 +707,7 @@ void loop()                                            //petla glowna programu
   read_Serial();
   lcdDisplay();
   rgb_Control(OCR2B);
-//  control();
+  control();
+  push_Button(); 
   if (Serial.available()>0) read_Serial();
 }
