@@ -35,12 +35,16 @@
 
 //*************************************          VARIABLES         **************************************
 
+float setpoint_temperature = 25;                    //zadana wartosc temperatury 
+float setpoint_humidity = 70;                       //zadana wartosc wilgotnosci
 int pulsewidth = 0;                                 //wypelnienie sygnalu regulujacego jasnosc swiecenia ledow
 int ledtime = 100;                                  //okres zmian jasnosci swiecenia tasmy LED
 int change = 25;                                    //zmiana poziomu swiecenia tasmy LED
-int maxledbright = 255;                             //maksymalna jasnosc swiecenia tasmy LED
-int lightsensorvalue = 900;                         //odczyt wartosci natezenia swiatla
-int lightintensity = 100;                           //zdeklarowany poziom wlaczenia oswietlenia nocnego
+int maxledbright = 250;                             //maksymalna jasnosc swiecenia tasmy LED
+int lightsensorvalue = 0;                           //odczyt wartosci natezenia swiatla
+int lightintensity = 1023;                          //zdeklarowany poziom wlaczenia oswietlenia nocnego
+int fogging_time = 20000;                           //zadeklarowany czas generowania mgly po wlaczeniu manualnym
+int wait_for_fan_time = 5000;                       //czas po rozpoczeciu generowania mgly, po ktorym wlaczy sie wentylator
 byte relay = 255;                                   //domyslna wartosc przekaznikow (255 wszystkie wylaczone)                                         
 unsigned long time;                                 //zmienna okresu wentylatora
 unsigned int rpmfan;                                //zmienna predkosci obrotow wentylatora
@@ -98,8 +102,8 @@ void setup()                                        //funkcja konfiguracyjna
 
   pinMode(LIGHTSENSORPIN,   INPUT);                 //ustawienie pinu czujnika natezenia swiatla jako wejscie
   pinMode(PIRPIN,           INPUT);                 //ustawienie pinu czujnika PIR jako wejscie
-  pinMode(BUTTONPIN,        INPUT);                 //ustawienie pinu przycisku jako wejscie
   pinMode(RPMPIN,           INPUT);                 //ustawienie pinu odczytu predkosci wentylatora jako wejscie
+  pinMode(BUTTONPIN,        INPUT_PULLUP);          //ustawienie pinu przycisku jako wejscie z rezystorem podciagajacym
   
   hc595(relay);                                     //ustawienie wyjsc rejestru przesuwnego na zadeklarowana wczesniej wartosc
 
@@ -292,12 +296,12 @@ void turnOn_NightLight()                              //funkcja kontrolowania os
 {
   lightsensorvalue = analogRead(LIGHTSENSORPIN);      //odczyt natezenia swiatla z fotorezystora              
   
-  if (lightsensorvalue < lightintensity && digitalRead(PIRPIN) == LOW) {
-       set_Byte(NIGHTLEDRELAY, relay);                //wlaczenie oswietlenia nocnego   
+  if (lightsensorvalue >= lightintensity && digitalRead(PIRPIN) == LOW) {
+       clear_Byte(NIGHTLEDRELAY, relay);              //wlaczenie oswietlenia nocnego   
        hc595(relay); 
   } 
   else {
-       clear_Byte(NIGHTLEDRELAY, relay);              //wylaczenie oswietlenia nocnego 
+       set_Byte(NIGHTLEDRELAY, relay);                //wylaczenie oswietlenia nocnego 
        hc595(relay);      
   }
 }
@@ -323,6 +327,16 @@ void toggle_BulbDiode()                               //funkcja sygnalizacji sta
   }
 }
 
+void lightOn_BulbDiode()
+{
+ digitalWrite(DIODEBULBPIN, HIGH);  
+}
+
+void lightOff_BulbDiode()
+{
+ digitalWrite(DIODEBULBPIN, LOW);  
+}
+
 //*************************************          FOGGER DIODE          **************************************
 
 void toggle_FoggerDiode()                             //funkcja sygnalizacji stanu pracy zarowki grzewczej
@@ -336,31 +350,17 @@ void toggle_FoggerDiode()                             //funkcja sygnalizacji sta
   }
 }
 
+void lightOn_FoggerDiode()
+{
+ digitalWrite(DIODEFOGGERPIN, HIGH);  
+}
+
+void lightOff_FoggerDiode()
+{
+ digitalWrite(DIODEFOGGERPIN, LOW);  
+}
+
 //*************************************          RGB DIODE          **************************************
-    
-void rgb_RedColor(){
-    analogWrite(RGBDIODEREDPIN, 255);  
-    analogWrite(RGBDIODEGREENPIN, 0);
-    analogWrite(RGBDIODEBLUEPIN, 0);
-}
-
-void rgb_OrangeColor(){
-    analogWrite(RGBDIODEREDPIN, 255);  
-    analogWrite(RGBDIODEGREENPIN, 165);
-    analogWrite(RGBDIODEBLUEPIN, 0);
-}
-
-void rgb_YellowColor(){
-    analogWrite(RGBDIODEREDPIN, 255);  
-    analogWrite(RGBDIODEGREENPIN, 255);
-    analogWrite(RGBDIODEBLUEPIN, 0);
-}
-
-void rgb_GreenColor(){
-    analogWrite(RGBDIODEREDPIN, 0);  
-    analogWrite(RGBDIODEGREENPIN, 255);
-    analogWrite(RGBDIODEBLUEPIN, 0);
-}
 
 void rgb_BlueColor(){
     analogWrite(RGBDIODEREDPIN, 0);  
@@ -380,6 +380,20 @@ void rgb_TurquoiseColor(){
     analogWrite(RGBDIODEBLUEPIN, 255);
 }
 
+void rgb_Control(int duty_cycle){
+  if (duty_cycle <= 30)
+  { rgb_TurquoiseColor();
+  }
+
+  else if (duty_cycle > 30 && duty_cycle <=60)
+  {
+    rgb_BlueColor();
+  }
+
+  else{
+    rgb_PurpleColor();
+  }
+}
 
 //*************************************          LED STRIPES          **************************************
 
@@ -430,7 +444,6 @@ void led_Fade_Manual()                             //reczne sciemnianie ledow
 }
 
 
-
 //*************************************          PWM FAN          **************************************
 
 void set_Fan_Speed(uint8_t duty_cycle)                //funkcja ustawiania wypelnienia sygnalu wentylatora
@@ -464,12 +477,6 @@ void fan_SlowDown()                                   //funkcja zmniejszania pre
  }
 }
 
-void toggle_FoggerFan()                               //funkcja wlaczania/wylaczania wentylatora
-{                  
-  toggle_Byte(FOGGERFANRELAY, relay);                 //zmiana stanu na bicie odpowiedzialnym za wentylator
-  hc595(relay);                                       //ustawienie rejestru przesuwnego
-}
-
  
 //*************************************          HEAT BULB          **************************************
 
@@ -491,17 +498,43 @@ void toggle_Bulb()                                    //funkcja wlaczania/wylacz
   hc595(relay);
 }
 
-//*************************************          FOGGER          **************************************
 
-void lightOn_Fogger()                                   //funkcja wlaczania generatora mgly
+//*************************************          FOGGER FAN       **************************************
+
+void turnOn_FoggerFan()                                  
 {
-  clear_Byte(FOGGERRELAY, relay);                       //stan niski na bicie odpowiedzialnym za generator mgly
+  clear_Byte(FOGGERFANRELAY, relay);                      
   hc595(relay);
 }
 
-void lightOff_Fogger()                                  //funkcja wylaczania generatora mgly
+void turnOff_FoggerFan()                                  
 {                  
-  set_Byte(FOGGERRELAY, relay);                         //stan wysoki na bicie odpowiedzialnym za generator mgly
+  set_Byte(FOGGERFANRELAY, relay);                         
+  hc595(relay);
+}
+
+void toggle_FoggerFan()                                    
+{                  
+  toggle_Byte(FOGGERFANRELAY, relay);                      
+  hc595(relay);
+}
+
+
+//*************************************          FOGGER          **************************************
+
+void turnOn_Fogger()                                   //funkcja wlaczania generatora mgly
+{
+  clear_Byte(FOGGERRELAY, relay);                      //stan niski na bicie odpowiedzialnym za generator mgly
+  hc595(relay);
+  delay(wait_for_fan_time);                            //oczekiwanie aby wlaczyc wentylator
+  turnOn_FoggerFan();                                  //wlaczenie wentylatora
+  hc595(relay);
+}
+
+void turnOff_Fogger()                                  //funkcja wylaczania generatora mgly
+{                  
+  set_Byte(FOGGERRELAY, relay);                        //stan wysoki na bicie odpowiedzialnym za generator mgly
+  turnOff_FoggerFan();                                 //wylaczenie wentylatora 
   hc595(relay);
 }
 
@@ -509,6 +542,15 @@ void toggle_Fogger()                                    //funkcja wlaczania/wyla
 {                  
   toggle_Byte(FOGGERRELAY, relay);                      //zmiana stanu na bicie odpowiedzialnym za generator mgly
   hc595(relay);
+}
+
+void push_Button()                                      //funkcja wlaczajaca zamglawiacz manualnie za pomoca przycisku
+{
+  if (BUTTONPIN == LOW){                                //jezeli wcisnieto przycisk
+    turnOn_Fogger();                                    //wlacz zamglawiacz
+    delay(fogging_time);                                //odczekaj ustalony czas
+    turnOff_Fogger();                                   //wylacz zamglawiacz
+  }
 }
 
 
@@ -526,7 +568,7 @@ void print_Clock()                                    //funkcja wyswietlajaca cz
 bool parse=false;
 bool config=false;
        
-if (true /*parse && config*/) {                                //sprawdzenie poprawnosci konfiguracji zegara
+if (true /*parse && config*/) {                       //sprawdzenie poprawnosci konfiguracji zegara
   Serial.print("DS1307 configured Time=");
   Serial.print(tm.Hour);                              //wyswietlanie godziny konfiguracji zegara
   Serial.print(":");
@@ -615,27 +657,38 @@ led_Fade_Manual();
 Serial.println("Zmniejszono jasnosc ledow");
 }
 
-if (incomingByte == '10') {                             //jezeli wyslano 10 to podaj odczyty stanów
+if (incomingByte == 's') {                             //jezeli wyslano s to podaj odczyty stanów
 Serial.println(digitalRead(BUTTONPIN));
 Serial.println(digitalRead(PIRPIN));
 Serial.println(analogRead(LIGHTSENSORPIN));
 }
 
-if (incomingByte == 'b') {                             
-rgb_BlueColor();
-Serial.println("Kolor niebieski");
 }
 
-if (incomingByte == 'p') {                             
-rgb_PurpleColor();
-Serial.println("Kolor fioletowy");
+
+//*************************************       CONTROL ALGORITM      **************************************
+
+void control(){                                                     
+                                                                     //regulacja temperatury
+if(setpoint_temperature>=sensor.readTemperature()){                  //jezeli temperatura nizsza od zadanej
+  lightOn_Bulb();                                                    //wlaczenie zarowki grzewczej
+  lightOn_BulbDiode();                                               //wlaczenie diody zarowki
 }
 
-if (incomingByte == 't') {                             
-rgb_TurquoiseColor();
-Serial.println("Kolor turkusowy");
+ if(setpoint_temperature+0.5<=sensor.readTemperature()){             //histereza 0.5 stopnia
+  lightOff_Bulb();                                                   //wylaczenie zarowki grzewczej
+  lightOff_BulbDiode();                                              //wylaczenie diody zarowki
+}
+                                                                     //regulacja wilgotnosci
+if(setpoint_humidity>=sensor.readHumidity()){                        //jezeli wilgotnosc nizsza od zadanej
+  turnOn_Fogger();                                                   //wlaczenie generatora mgly
+  lightOn_FoggerDiode();                                             //wlaczenie diody generatora
 }
 
+ if(setpoint_humidity+5<=sensor.readHumidity()){                     //histereza 5 procent
+  turnOff_Fogger();                                                  //wylaczenie generatora
+  lightOff_FoggerDiode();                                            //wylaczenie diody generatora
+}
 }
 
 
@@ -644,10 +697,10 @@ Serial.println("Kolor turkusowy");
 void loop()                                            //petla glowna programu
 {
   RTC.read(tm);
-  read_Serial();
   hc595(relay);
+  read_Serial();
   lcdDisplay();
-  toggle_BulbDiode();
-  toggle_FoggerDiode();
+  rgb_Control(OCR2B);
+//  control();
   if (Serial.available()>0) read_Serial();
 }
