@@ -44,13 +44,17 @@ int ledtime = 100;                                  //okres zmian jasnosci swiec
 int change = 25;                                    //zmiana poziomu swiecenia tasmy LED
 int maxledbright = 250;                             //maksymalna jasnosc swiecenia tasmy LED
 int lightsensorvalue = 0;                           //odczyt wartosci natezenia swiatla
-int lightintensity = 1023;                          //zdeklarowany poziom wlaczenia oswietlenia nocnego
-int fogging_time = 20000;                           //zadeklarowany czas generowania mgly po wlaczeniu manualnym
-int wait_for_fan_time = 5000;                       //czas po rozpoczeciu generowania mgly, po ktorym wlaczy sie wentylator
+int lightintensity = 1023;                          //zdeklarowany poziom wlaczenia oswietlenia nocneg
+int fandelaytime = 5000;                            //czas po rozpoczeciu generowania mgly, po ktorym wlaczy sie wentylator
+unsigned long turnOnFoggerMillis = 0;               //czas od wlaczenia mgly
+unsigned long turnOnFoggerFanMillis = 0;            //czas od wlaczenia wiatraka
+unsigned long previousLedMillis = 0;                //czas od ostatniego wlaczenia ledow
+const long foggingtime = 20000;                     //zadeklarowany czas generowania mgly po wlaczeniu manualnym
 byte relay = 255;                                   //domyslna wartosc przekaznikow (255 wszystkie wylaczone)                                         
 unsigned long time;                                 //zmienna okresu wentylatora
 unsigned int rpmfan;                                //zmienna predkosci obrotow wentylatora
 String stringRPM;                                   //predkosc obrotow wentylatora zapisana w ciagu znakow
+unsigned long currentMillis = millis();             //czas od uruchomienia programu
 
 int pwmPin = 3; // digital PWM pin 9
 int pwmVal = 1; // The PWM Value
@@ -201,10 +205,6 @@ void set_time()                                     //funkcja konfigurujaca czas
       config = true;
     }
   }
-
-//  Serial.begin(9600);                               //wlaczenie portu szeregowego
-//  while (!Serial) ; // wait for serial
-//  delay(200);
 
   Serial.println("DS1307RTC Start");            //wyswietlenie informacji o poprawnej konfiguracji zegara
   Serial.println("-------------------");
@@ -404,11 +404,15 @@ void led_Fade()                                       //funkcja symulowania zmie
  analogWrite(LEDPIN, pulsewidth);                     //generowanie sygnalu o zadanym wypelnieniu
  
  if (pulsewidth > 0) {                                //jesli wypelnienie wieksze od 0%
- pulsewidth = pulsewidth - change;                    //zmniejszamy wypelnienie
- } else {
+      if (currentMillis - previousFoggerMillis >= ledtime) { //jezeli uplynal czas zmian oswietlenia
+        previousLedMillis = currentMillis;
+        pulsewidth = pulsewidth - change;                    //zmniejszamy wypelnienie
+      }
+ }
+ else {
  pulsewidth = 0;                                      //jesli wypelnienie rowne 0% to zatrzymaj zmiany
  }
- delay(ledtime);                                      //zadeklarowany okres zmian jasnosci
+
 }
 
 void led_Bright()                                     //funkcja symulowania switu za pomoca oswietlenia
@@ -416,11 +420,14 @@ void led_Bright()                                     //funkcja symulowania swit
  analogWrite(LEDPIN, pulsewidth);                     //generowanie sygnalu o zadanym wypelnieniu
  
  if (pulsewidth < maxledbright) {                     //jesli wypelnienie mniejsze od maksymalnego zadeklarowanego
- pulsewidth = pulsewidth + change;                    //zwiekszamy wypelnienie
- } else {
+       if (currentMillis - previousFoggerMillis >= ledtime) { //jezeli uplynal czas zmian oswietlenia
+        previousLedMillis = currentMillis;
+        pulsewidth = pulsewidth + change;                    //zwiekszamy wypelnienie
+ } 
+ else {
  pulsewidth = maxledbright;                           //jesli wypelnienie wieksze od zadeklarowanego to pozostaw wartosc maksymalna
  }
- delay(ledtime);                                      //zadeklarowany okres zmian jasnosci
+
 }
 
 void led_Bright_Manual()                             //reczne rozjasnianie ledow     
@@ -505,13 +512,14 @@ void toggle_Bulb()                                    //funkcja wlaczania/wylacz
 
 void turnOn_FoggerFan()                                  
 {
-  clear_Byte(FOGGERFANRELAY, relay);                      
+     set_Byte(FOGGERFANRELAY, relay);                   
   hc595(relay);
 }
 
 void turnOff_FoggerFan()                                  
 {                  
-  set_Byte(FOGGERFANRELAY, relay);                         
+  
+  clear_Byte(FOGGERFANRELAY, relay);                         
   hc595(relay);
 }
 
@@ -527,10 +535,11 @@ void toggle_FoggerFan()
 void turnOn_Fogger()                                   //funkcja wlaczania generatora mgly
 {
   clear_Byte(FOGGERRELAY, relay);                      //stan niski na bicie odpowiedzialnym za generator mgly
-  hc595(relay);
-  delay(wait_for_fan_time);                            //oczekiwanie aby wlaczyc wentylator
+    turnOnFoggerFanMillis = millis();                        //czas wlaczenia funkcji
+    if (currentMillis - turnOnFoggerFanMillis >= fandelaytime) { //jezeli uplynal czas zamglawiania
   turnOn_FoggerFan();                                  //wlaczenie wentylatora
   hc595(relay);
+  }
 }
 
 void turnOff_Fogger()                                  //funkcja wylaczania generatora mgly
@@ -548,10 +557,11 @@ void toggle_Fogger()                                    //funkcja wlaczania/wyla
 
 void push_Button()                                      //funkcja wlaczajaca zamglawiacz manualnie za pomoca przycisku
 {
-  if (BUTTONPIN == LOW){                                //jezeli wcisnieto przycisk
-    turnOn_Fogger();                                    //wlacz zamglawiacz
-    delay(fogging_time);                                //odczekaj ustalony czas
-    turnOff_Fogger();                                   //wylacz zamglawiacz
+  if (digitalRead(BUTTONPIN) == HIGH){                    //jezeli wcisnieto przycisk
+    turnOn_Fogger();                                      //wlacz zamglawiacz
+    turnOnFoggerMillis = millis();                        //czas wlaczenia funkcji
+    if (currentMillis - turnOnFoggerMillis >= foggingtime) { //jezeli uplynal czas zamglawiania
+        turnOff_Fogger();                                 //wylacz zamglawiacz
   }
 }
 
@@ -660,8 +670,11 @@ Serial.println("Zmniejszono jasnosc ledow");
 }
 
 if (incomingByte == 's') {                             //jezeli wyslano s to podaj odczyty stanów
+  Serial.print("P: ");
 Serial.println(digitalRead(BUTTONPIN));
+ Serial.print("Pir: ");
 Serial.println(digitalRead(PIRPIN));
+ Serial.print("L: ");
 Serial.println(analogRead(LIGHTSENSORPIN));
 }
 
@@ -674,7 +687,7 @@ void control(){
                  
 float actual_temperature=sensor.readTemperature();                                                                     
                                                                      //regulacja temperatury
-if(setpoint_temperature>=actual_temperature){                  //jezeli temperatura nizsza od zadanej
+if(setpoint_temperature>=actual_temperature){                        //jezeli temperatura nizsza od zadanej
   lightOn_Bulb();                                                    //wlaczenie zarowki grzewczej
   lightOn_BulbDiode();                                               //wlaczenie diody zarowki
 }
@@ -686,12 +699,12 @@ if(setpoint_temperature>=actual_temperature){                  //jezeli temperat
            
 float actual_humidity=sensor.readHumidity();                                                                     
                                                                      //regulacja wilgotnosci
-if(setpoint_humidity>=actual_humidity){                                     //jezeli wilgotnosc nizsza od zadanej
+if(setpoint_humidity>=actual_humidity){                              //jezeli wilgotnosc nizsza od zadanej
   turnOn_Fogger();                                                   //wlaczenie generatora mgly
   lightOn_FoggerDiode();                                             //wlaczenie diody generatora
 }
 
- if(setpoint_humidity_histeresis<=actual_humidity){                                  //histereza
+ if(setpoint_humidity_histeresis<=actual_humidity){                                  //histereza i drugi warunek z andem żeby flaga była niewymuszona
   turnOff_Fogger();                                                  //wylaczenie generatora
   lightOff_FoggerDiode();                                            //wylaczenie diody generatora
 }
@@ -709,5 +722,6 @@ void loop()                                            //petla glowna programu
   rgb_Control(OCR2B);
   control();
   push_Button(); 
+  turnOn_NightLight();
   if (Serial.available()>0) read_Serial();
 }
