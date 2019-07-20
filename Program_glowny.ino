@@ -1,3 +1,4 @@
+
 //*************************************          LIBRARIES          **************************************
 
 #include "DHT.h"                                    //import biblioteki czujnika DHT
@@ -35,14 +36,18 @@
 
 //*************************************          VARIABLES         **************************************
 
-float setpoint_temperature = 25;                    //zadana wartosc temperatury 
-float setpoint_humidity = 70;                       //zadana wartosc wilgotnosci
+float day_temperature = 24;                         //zadana wartosc temperatury dziennej
+float night_temperature = 20;                       //zadana wartosc temperatury nocnej 
+float setpoint_temperature = 20;                    //zadana wartosc temperatury
 float setpoint_temperature_hysteresis = setpoint_temperature + 0.5;
+float setpoint_humidity = 70;                       //zadana wartosc wilgotnosci
 float setpoint_humidity_hysteresis = setpoint_humidity + 5;             
 int pulsewidth = 0;                                 //wypelnienie sygnalu regulujacego jasnosc swiecenia ledow
-int ledtime = 100;                                  //okres zmian jasnosci swiecenia tasmy LED
+int ledtime = 60000;                                //okres zmian jasnosci swiecenia tasmy LED
 int change = 25;                                    //zmiana poziomu swiecenia tasmy LED
 int maxledbright = 250;                             //maksymalna jasnosc swiecenia tasmy LED
+int morning_hour = 7;                               //godzina rozpoczecia switu
+int night_hour = 22;                                //godzina rozpoczecie zmierzchu
 int lightsensorvalue = 0;                           //odczyt wartosci natezenia swiatla
 int lightintensity = 1023;                          //zdeklarowany poziom wlaczenia oswietlenia nocneg
 int fandelaytime = 5000;                            //czas po rozpoczeciu generowania mgly, po ktorym wlaczy sie wentylator
@@ -289,24 +294,36 @@ void read_SensorDHT21()                               //funkcja odczytu danych z
 
 //*************************************          NIGHT LIGHTNING          **************************************
 
-void turnOn_NightLight()                              //funkcja kontrolowania oswietlenia nocnego
-{
-  lightsensorvalue = analogRead(LIGHTSENSORPIN);      //odczyt natezenia swiatla z fotorezystora              
-  
-  if (lightsensorvalue >= lightintensity && digitalRead(PIRPIN) == LOW) {
-       clear_Byte(NIGHTLEDRELAY, relay);              //wlaczenie oswietlenia nocnego   
-       hc595(relay); 
-  } 
-  else {
-       set_Byte(NIGHTLEDRELAY, relay);                //wylaczenie oswietlenia nocnego 
-       hc595(relay);      
-  }
+void turnOn_NightLight()                              //funkcja wlaczania oswietlenia nocnego
+{                  
+  clear_Byte(NIGHTLEDRELAY, relay);                   //zmiana stanu na bicie odpowiedzialnym za oswietlenie nocne
+  hc595(relay);                                       //ustawienie rejestru przesuwnego
+}
+
+void turnOff_NightLight()                             //funkcja wylaczania oswietlenia nocnego
+{                  
+  set_Byte(NIGHTLEDRELAY, relay);                     //zmiana stanu na bicie odpowiedzialnym za oswietlenie nocne
+  hc595(relay);                                       //ustawienie rejestru przesuwnego
 }
 
 void toggle_NightLight()                              //funkcja wlaczania/wylaczania oswietlenia nocnego
 {                  
   toggle_Byte(NIGHTLEDRELAY, relay);                  //zmiana stanu na bicie odpowiedzialnym za oswietlenie nocne
   hc595(relay);                                       //ustawienie rejestru przesuwnego
+}
+
+void night_lightning()                                //funkcja kontrolowania oswietlenia nocnego
+{
+  lightsensorvalue = analogRead(LIGHTSENSORPIN);      //odczyt natezenia swiatla z fotorezystora              
+  
+  if (lightsensorvalue >= lightintensity && digitalRead(PIRPIN) == LOW) {
+    if (tm.Hour >= night_hour || tm.Hour < day_hour){
+      turnOn_NightLight();                            //wlacz oswietlenie nocne
+    }
+  } 
+  else {
+    turnOff_NightLight();                             //wylacz oswietlenie nocne
+  }
 }
 
 
@@ -444,6 +461,16 @@ void led_Fade_Manual()                             //reczne sciemnianie ledow
  } else {
  pulsewidth = 0;                           
  }
+}
+
+void day_lightning()                               //funkcja sterujaca oswietleniem dziennym
+{
+  if(tm.Hour >= morning_hour && tm.Hour < night_hour){}
+  led_Bright();                                    //wlacz rozjasnianie rano 
+  {}
+  else if(tm.Hour >= night_hour){
+  led_Fade() ;                                     //wlacz sciemnianie wieczorem            
+  }
 }
 
 
@@ -683,7 +710,15 @@ Serial.println(analogRead(LIGHTSENSORPIN));
 
 void control(){                                                     
                  
-float actual_temperature = sensor.readTemperature();       
+float actual_temperature = sensor.readTemperature();      
+
+if(tm.Hour >= morning_hour && tm.Hour < night_hour){
+setpoint_temperature = day_temperature;
+}
+else{
+setpoint_temperature = night_temperature;
+}
+
 float temperature_difference = actual_temperature - setpoint_temperature;  //roznica temperatury  
 float fan_speed = fan_scaler*temperature_difference;                 //predkosc wentylatora                           
                                                                     
@@ -710,7 +745,7 @@ if(setpoint_humidity >= actual_humidity){                            //jezeli wi
 
 //*************************************          MAIN LOOP          **************************************
 
-void loop()                                            //petla glowna programu
+void loop()                                          //petla glowna programu
 {
   RTC.read(tm);
   hc595(relay);
@@ -719,6 +754,7 @@ void loop()                                            //petla glowna programu
   rgb_Control(OCR2B);
   control();
   push_Button(); 
-  turnOn_NightLight();
+  day_lightning();
+  night_lightning();
   if (Serial.available()>0) read_Serial();
 }
