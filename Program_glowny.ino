@@ -37,8 +37,8 @@
 
 float setpoint_temperature = 25;                    //zadana wartosc temperatury 
 float setpoint_humidity = 70;                       //zadana wartosc wilgotnosci
-float setpoint_temperature_histeresis = setpoint_temperature + 0.5;
-float setpoint_humidity_histeresis = setpoint_humidity + 5;             
+float setpoint_temperature_hysteresis = setpoint_temperature + 0.5;
+float setpoint_humidity_hysteresis = setpoint_humidity + 5;             
 int pulsewidth = 0;                                 //wypelnienie sygnalu regulujacego jasnosc swiecenia ledow
 int ledtime = 100;                                  //okres zmian jasnosci swiecenia tasmy LED
 int change = 25;                                    //zmiana poziomu swiecenia tasmy LED
@@ -46,6 +46,7 @@ int maxledbright = 250;                             //maksymalna jasnosc swiecen
 int lightsensorvalue = 0;                           //odczyt wartosci natezenia swiatla
 int lightintensity = 1023;                          //zdeklarowany poziom wlaczenia oswietlenia nocneg
 int fandelaytime = 5000;                            //czas po rozpoczeciu generowania mgly, po ktorym wlaczy sie wentylator
+int fan_scaler = 10;                                //skalowanie predkosci wentylatora
 unsigned long turnOnFoggerMillis = 0;               //czas od wlaczenia mgly
 unsigned long turnOnFoggerFanMillis = 0;            //czas od wlaczenia wiatraka
 unsigned long previousLedMillis = 0;                //czas od ostatniego wlaczenia ledow
@@ -59,7 +60,6 @@ unsigned long currentMillis = millis();             //czas od uruchomienia progr
 int pwmPin = 3; // digital PWM pin 9
 int pwmVal = 1; // The PWM Value
 int speeddutycycle = 0;                             //wypelnienie sygnalu wentylatora (w zakresie od 0-80)
-
 
 
 //*************************************          STRUCTURES          **************************************
@@ -127,10 +127,6 @@ void setup()                                        //funkcja konfiguracyjna
   analogWrite(RGBDIODEREDPIN, 0);  
   analogWrite(RGBDIODEGREENPIN, 0);
   analogWrite(RGBDIODEBLUEPIN, 0);
-// digitalWrite(RPMPIN, HIGH);                      //odczyt predkosci wentylatora
-
-
-
 }
 
 //*************************************          SHIFT REGISTER          **************************************
@@ -157,7 +153,6 @@ void send_Data()                                    //funkcja przesylu ramki dan
 {
  Serial.write(TxFrame.bytes_to_send.tab_bytes, TXFRAMESIZE);
 }
-
 
 
 //*************************************          BYTES          **************************************
@@ -315,7 +310,6 @@ void toggle_NightLight()                              //funkcja wlaczania/wylacz
 }
 
 
-
 //*************************************          BULB DIODE          **************************************
 
 void toggle_BulbDiode()                               //funkcja sygnalizacji stanu pracy zarowki grzewczej
@@ -404,7 +398,7 @@ void led_Fade()                                       //funkcja symulowania zmie
  analogWrite(LEDPIN, pulsewidth);                     //generowanie sygnalu o zadanym wypelnieniu
  
  if (pulsewidth > 0) {                                //jesli wypelnienie wieksze od 0%
-      if (currentMillis - previousFoggerMillis >= ledtime) { //jezeli uplynal czas zmian oswietlenia
+      if (currentMillis - previousLedMillis >= ledtime) { //jezeli uplynal czas zmian oswietlenia
         previousLedMillis = currentMillis;
         pulsewidth = pulsewidth - change;                    //zmniejszamy wypelnienie
       }
@@ -420,14 +414,14 @@ void led_Bright()                                     //funkcja symulowania swit
  analogWrite(LEDPIN, pulsewidth);                     //generowanie sygnalu o zadanym wypelnieniu
  
  if (pulsewidth < maxledbright) {                     //jesli wypelnienie mniejsze od maksymalnego zadeklarowanego
-       if (currentMillis - previousFoggerMillis >= ledtime) { //jezeli uplynal czas zmian oswietlenia
+       if (currentMillis - previousLedMillis >= ledtime) { //jezeli uplynal czas zmian oswietlenia
         previousLedMillis = currentMillis;
         pulsewidth = pulsewidth + change;                    //zwiekszamy wypelnienie
- } 
- else {
- pulsewidth = maxledbright;                           //jesli wypelnienie wieksze od zadeklarowanego to pozostaw wartosc maksymalna
+       } 
+       else {
+       pulsewidth = maxledbright;                           //jesli wypelnienie wieksze od zadeklarowanego to pozostaw wartosc maksymalna
+       }
  }
-
 }
 
 void led_Bright_Manual()                             //reczne rozjasnianie ledow     
@@ -492,12 +486,14 @@ void fan_SlowDown()                                   //funkcja zmniejszania pre
 void lightOn_Bulb()                                   //funkcja wlaczania zarowki grzewczej
 {
   clear_Byte(BULBRELAY, relay);                       //stan niski na bicie odpowiedzialnym za zarowke
+  lightOn_BulbDiode();                                //wlaczenie diody zarowki
   hc595(relay);
 }
 
 void lightOff_Bulb()                                  //funkcja wylaczania zarowki grzewczej
 {                  
   set_Byte(BULBRELAY, relay);                         //stan wysoki na bicie odpowiedzialnym za zarowke
+  lightOff_BulbDiode();                               //wylaczenie diody zarowki
   hc595(relay);
 }
 
@@ -512,13 +508,12 @@ void toggle_Bulb()                                    //funkcja wlaczania/wylacz
 
 void turnOn_FoggerFan()                                  
 {
-     set_Byte(FOGGERFANRELAY, relay);                   
+  set_Byte(FOGGERFANRELAY, relay);                   
   hc595(relay);
 }
 
 void turnOff_FoggerFan()                                  
 {                  
-  
   clear_Byte(FOGGERFANRELAY, relay);                         
   hc595(relay);
 }
@@ -535,17 +530,19 @@ void toggle_FoggerFan()
 void turnOn_Fogger()                                   //funkcja wlaczania generatora mgly
 {
   clear_Byte(FOGGERRELAY, relay);                      //stan niski na bicie odpowiedzialnym za generator mgly
-    turnOnFoggerFanMillis = millis();                        //czas wlaczenia funkcji
+    turnOnFoggerFanMillis = millis();                  //czas wlaczenia funkcji
     if (currentMillis - turnOnFoggerFanMillis >= fandelaytime) { //jezeli uplynal czas zamglawiania
   turnOn_FoggerFan();                                  //wlaczenie wentylatora
   hc595(relay);
   }
+    lightOn_FoggerDiode();                             //wlaczenie diody generatora
 }
 
 void turnOff_Fogger()                                  //funkcja wylaczania generatora mgly
 {                  
   set_Byte(FOGGERRELAY, relay);                        //stan wysoki na bicie odpowiedzialnym za generator mgly
   turnOff_FoggerFan();                                 //wylaczenie wentylatora 
+  lightOff_FoggerDiode();                              //wylaczenie diody generatora
   hc595(relay);
 }
 
@@ -562,6 +559,7 @@ void push_Button()                                      //funkcja wlaczajaca zam
     turnOnFoggerMillis = millis();                        //czas wlaczenia funkcji
     if (currentMillis - turnOnFoggerMillis >= foggingtime) { //jezeli uplynal czas zamglawiania
         turnOff_Fogger();                                 //wylacz zamglawiacz
+    }
   }
 }
 
@@ -685,28 +683,27 @@ Serial.println(analogRead(LIGHTSENSORPIN));
 
 void control(){                                                     
                  
-float actual_temperature=sensor.readTemperature();                                                                     
-                                                                     //regulacja temperatury
-if(setpoint_temperature>=actual_temperature){                        //jezeli temperatura nizsza od zadanej
+float actual_temperature = sensor.readTemperature();       
+float temperature_difference = actual_temperature - setpoint_temperature;  //roznica temperatury  
+float fan_speed = fan_scaler*temperature_difference;                 //predkosc wentylatora                           
+                                                                    
+if(setpoint_temperature >= actual_temperature){                      //jezeli temperatura nizsza od zadanej
   lightOn_Bulb();                                                    //wlaczenie zarowki grzewczej
-  lightOn_BulbDiode();                                               //wlaczenie diody zarowki
 }
 
- if(setpoint_temperature_histeresis<=actual_temperature){             //histereza
+ if(setpoint_temperature_hysteresis <= actual_temperature){          //histereza
   lightOff_Bulb();                                                   //wylaczenie zarowki grzewczej
-  lightOff_BulbDiode();                                              //wylaczenie diody zarowki
+  set_Fan_Speed(fan_speed);                                           //ustawienie predkosci wentylatora
 }
            
-float actual_humidity=sensor.readHumidity();                                                                     
-                                                                     //regulacja wilgotnosci
-if(setpoint_humidity>=actual_humidity){                              //jezeli wilgotnosc nizsza od zadanej
+float actual_humidity = sensor.readHumidity();                                                                     
+                                                                     
+if(setpoint_humidity >= actual_humidity){                            //jezeli wilgotnosc nizsza od zadanej
   turnOn_Fogger();                                                   //wlaczenie generatora mgly
-  lightOn_FoggerDiode();                                             //wlaczenie diody generatora
 }
 
- if(setpoint_humidity_histeresis<=actual_humidity){                                  //histereza i drugi warunek z andem żeby flaga była niewymuszona
+ if(setpoint_humidity_hysteresis <= actual_humidity){                //histereza
   turnOff_Fogger();                                                  //wylaczenie generatora
-  lightOff_FoggerDiode();                                            //wylaczenie diody generatora
 }
 }
 
