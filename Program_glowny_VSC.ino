@@ -37,11 +37,11 @@
 
 //*************************************          VARIABLES         **************************************
 
-float day_temperature = 24;                         //zadana wartosc temperatury dziennej
-float night_temperature = 20;                       //zadana wartosc temperatury nocnej 
-float setpoint_temperature = 20;                    //zadana wartosc temperatury
+float day_temperature = 24.0;                         //zadana wartosc temperatury dziennej
+float night_temperature = 20.0;                       //zadana wartosc temperatury nocnej 
+float setpoint_temperature; 
 float setpoint_temperature_hysteresis = setpoint_temperature + 0.5;  //histereza temperatury
-float setpoint_humidity = 70;                       //zadana wartosc wilgotnosci
+float setpoint_humidity;                       //zadana wartosc wilgotnosci
 float setpoint_humidity_hysteresis = setpoint_humidity + 5;  //histereza wilgotnosci           
 int pulsewidth = 0;                                 //wypelnienie sygnalu regulujacego jasnosc swiecenia ledow
 int ledtime = 60000;                                //okres zmian jasnosci swiecenia tasmy LED
@@ -56,13 +56,22 @@ int fan_scaler = 10;                                //skalowanie predkosci wenty
 int speeddutycycle = 0;                             //wypelnienie sygnalu wentylatora (w zakresie od 0-80)
 unsigned long turnOnFoggerMillis = 0;               //czas od wlaczenia mgly
 unsigned long turnOnFoggerFanMillis = 0;            //czas od wlaczenia wiatraka
+unsigned long turnOnButtonMillis = 0;
 unsigned long previousLedMillis = 0;                //czas od ostatniego wlaczenia ledow
-const long foggingtime = 20000;                     //zadeklarowany czas generowania mgly po wlaczeniu manualnym
+const long foggingtime = 10000;                     //zadeklarowany czas generowania mgly po wlaczeniu manualnym
 byte relay = 255;                                   //domyslna wartosc przekaznikow (255 wszystkie wylaczone)                                         
 unsigned long time;                                 //zmienna okresu wentylatora
 unsigned int rpmfan;                                //zmienna predkosci obrotow wentylatora
 String stringRPM;                                   //predkosc obrotow wentylatora zapisana w ciagu znakow
 unsigned long currentMillis = millis();             //czas od uruchomienia programu
+bool check_status=false;
+bool button_status=false;
+bool fogger_status=false;                              //sprawdzanie dzialania foggera
+bool bulb_status=false;                               //sprawdzanie dzialania zarowki
+const int TX_FRAME_SIZE = 21;
+const int RX_FRAME_SIZE = 21;
+const int START_CODE = 0x40;
+const int END_CODE = 0x80;
 
 int pwmPin = 3; // digital PWM pin 9
 int pwmVal = 1; // The PWM Value
@@ -85,16 +94,52 @@ const char *monthName[12] = {                       //definicja tablicy miesięc
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
 };
         
-struct bytes {                                      //struktura adresów 
-  uint8_t tab_bytes[TXFRAMESIZE];
-};
+//struct bytes {                                      //struktura adresów 
+//  uint8_t tab_bytes[TXFRAMESIZE];
+//};
 
-union send_frame {                                  //definicja unii wysyłanej ramki danych
-  data values ;                                     //dane
-  bytes bytes_to_send;                              //bajty do wysyłania
-};
 
-union send_frame TxFrame;                           //ramka transmiji danych
+struct dataTX
+{
+  uint8_t start_code;
+  uint8_t one;
+  uint16_t two;
+  uint32_t three;
+  float value_temperature;
+  float value_humidity;
+  uint8_t value_fan;
+  uint8_t value_time;
+  uint8_t value_bulb;
+  uint8_t value_fogger;
+  uint8_t end_code;
+} __attribute__((__packed__));
+
+union frameTX_u {
+  uint8_t *bytes;
+  struct dataTX *data;
+} frameTX;
+
+struct dataRX
+{
+  uint8_t start_code;
+  uint8_t receive_one;
+  uint16_t receive_two;
+  uint32_t receive_three;
+  uint16_t receive_temperature;
+  uint16_t receive_humidity;
+  uint8_t receive_fan;
+  uint8_t receive_time;
+  uint8_t receive_bulb;
+  uint8_t receive_fogger;
+  uint8_t end_code;
+} __attribute__((__packed__));
+
+union frameRX_u {
+  uint8_t *bytes;
+  struct dataRX *data;
+} frameRX;
+
+
 
 
 //*************************************          FUNCTIONS          **************************************
@@ -118,6 +163,7 @@ void setup()                                        //funkcja konfiguracyjna
   pinMode(BUTTONPIN,        INPUT_PULLUP);          //ustawienie pinu przycisku jako wejscie z rezystorem podciagajacym
   
   hc595(relay);                                     //ustawienie wyjsc rejestru przesuwnego na zadeklarowana wczesniej wartosc
+  turnOff_FoggerFan();
 
   Serial.begin(SERIALSPEED);                        //uruchomienie UART z zadeklarowana wczesniej wartoscia
   set_time();                                       //ustawienie czasu
@@ -133,6 +179,22 @@ void setup()                                        //funkcja konfiguracyjna
   analogWrite(RGBDIODEREDPIN, 0);  
   analogWrite(RGBDIODEGREENPIN, 0);
   analogWrite(RGBDIODEBLUEPIN, 0);
+  currentMillis = millis(); 
+
+  frameTX.bytes = new uint8_t[TX_FRAME_SIZE];
+  frameRX.bytes = new uint8_t[RX_FRAME_SIZE];
+  frameTX.data->one=4;
+  frameTX.data->two=300;
+  frameTX.data->three=121;
+  frameTX.data->value_temperature = sensor.readTemperature();
+  frameTX.data->value_humidity = sensor.readHumidity();
+  frameTX.data->value_fan = OCR2B;
+  frameTX.data->value_time = tm.Hour;
+  frameTX.data->value_bulb = bulb_status;
+  frameTX.data->value_fogger = fogger_status;
+  frameTX.data->start_code = START_CODE;
+  frameTX.data->end_code = END_CODE;
+  
 }
 
 //*************************************          SHIFT REGISTER          **************************************
@@ -147,17 +209,33 @@ void hc595(byte value)                              //funkcja sterowania rejestr
 
 //*************************************          TRANSMISION          **************************************
 
-void setup_TxFrame_data()                           //funkcja deklarujaca ramke transmisji danych
-{
-//  TxFrame.values.start_code=0x40;                 //kod poczatku
-//  TxFrame.values.code=0x20;                       //kod funkcji
-//  TxFrame.values.length_frame=TXFRAMESIZE;        //kod dlugosci ramki
-//  TxFrame.values.stop_code=0x80;                  //kod konca 
-}
+void transmision(){
+  
+  frameTX.data->value_temperature = sensor.readTemperature();
+  frameTX.data->value_humidity = sensor.readHumidity();
+  frameTX.data->value_fan = OCR2B;
+  frameTX.data->value_time = tm.Hour;
+  frameTX.data->value_bulb = bulb_status;
+  frameTX.data->value_fogger=fogger_status;
+  
+  Serial.write(frameTX.bytes, TX_FRAME_SIZE);
 
-void send_Data()                                    //funkcja przesylu ramki danych
-{
- Serial.write(TxFrame.bytes_to_send.tab_bytes, TXFRAMESIZE);
+  if (Serial.available() >= RX_FRAME_SIZE)
+  {
+    for (byte i = 0; i < RX_FRAME_SIZE; i++)
+    {
+      frameRX.bytes[i] = Serial.read();
+    }
+      frameTX.data->one = frameRX.data->receive_one;
+      frameTX.data->two = frameRX.data->receive_two;
+      frameTX.data->three = frameRX.data->receive_three;
+      frameTX.data->value_temperature = frameRX.data->receive_temperature;
+      frameTX.data->value_humidity = frameRX.data->receive_humidity;
+      frameTX.data->value_fan = frameRX.data->receive_fan;
+      frameTX.data->value_time = frameRX.data->receive_time;
+      frameTX.data->value_bulb = frameRX.data->receive_bulb;
+      frameTX.data->value_fogger = frameRX.data->receive_fogger;
+  }
 }
 
 
@@ -289,8 +367,8 @@ lcd.print("%");
 
 void read_SensorDHT21()                                      //funkcja odczytu danych z czujnika DHT21
 {
- TxFrame.values.temperature = sensor.readTemperature();     //przypisz zmiennej odczyt temperatury powietrza
- TxFrame.values.humidity = sensor.readHumidity();           //przypisz zmiennej odczyt wilgotnosci powietrza
+// TxFrame.values.temperature = sensor.readTemperature();     //przypisz zmiennej odczyt temperatury powietrza
+// TxFrame.values.humidity = sensor.readHumidity();           //przypisz zmiennej odczyt wilgotnosci powietrza
  //TxFrame.values.fan = OCR2B;                                //przypisz zmiennej odczyt predkosci wiatraka
  //TxFrame.values.time = tm.Hour;                             //przypisz zmiennej odczyt aktualnej godziny
  //TxFrame.values.bulb = bulb_status;                         //przypisz zmiennej odczyt stanu zarowki
@@ -322,7 +400,7 @@ void night_lightning()                                //funkcja kontrolowania os
   lightsensorvalue = analogRead(LIGHTSENSORPIN);      //odczyt natezenia swiatla z fotorezystora              
   
   if (lightsensorvalue >= lightintensity && digitalRead(PIRPIN) == LOW) {  //jezeli wykryto ruch w ciemnym pomieszczeniu
-    if (tm.Hour >= night_hour || tm.Hour < day_hour){  //jezeli jest noc
+    if (tm.Hour >= night_hour || tm.Hour < morning_hour){  //jezeli jest noc
       turnOn_NightLight();                             //wlacz oswietlenie nocne
     }
   } 
@@ -447,9 +525,9 @@ void led_Fade_Manual()                             //reczne sciemnianie ledow
 
 void day_lightning()                                     //funkcja sterujaca oswietleniem dziennym
 {
-  if(tm.Hour >= morning_hour && tm.Hour < night_hour){}
+  if(tm.Hour >= morning_hour && tm.Hour < night_hour){
   led_Bright();                                          //wlacz rozjasnianie rano 
-  {}
+  }
   else if(tm.Hour >= night_hour){
   led_Fade() ;                                           //wlacz sciemnianie wieczorem            
   }
@@ -492,8 +570,6 @@ void fan_SlowDown()                                   //funkcja zmniejszania pre
  
 //*************************************          HEAT BULB          **************************************
 
-bool bulb_status=false;                               //sprawdzanie dzialania zarowki
-
 void lightOn_Bulb()                                   //funkcja wlaczania zarowki grzewczej
 {
   clear_Byte(BULBRELAY, relay);                       //stan niski na bicie odpowiedzialnym za zarowke
@@ -506,7 +582,7 @@ void lightOff_Bulb()                                  //funkcja wylaczania zarow
 {                  
   set_Byte(BULBRELAY, relay);                         //stan wysoki na bicie odpowiedzialnym za zarowke
   lightOff_BulbDiode();                               //wylaczenie diody zarowki
-  bulb_status==false;                                 //informacja ze zarowka jest wylaczona
+  bulb_status=false;                                 //informacja ze zarowka jest wylaczona
   hc595(relay);
 }
 
@@ -537,27 +613,35 @@ void toggle_FoggerFan()
   hc595(relay);
 }
 
+void check_fogger_fan(){
+
+      if (check_status==true){
+        if (currentMillis >=  (turnOnFoggerMillis + fandelaytime)) { //jezeli uplynal czas zamglawiania
+        turnOn_FoggerFan();                                  //wlaczenie wentylatora
+        check_status=false;
+        }
+      }
+}
+
 
 //*************************************          FOGGER          **************************************
 
-bool fogger_status=false;                              //sprawdzanie dzialania foggera
 
 void turnOn_Fogger()                                   //funkcja wlaczania generatora mgly
 {
   clear_Byte(FOGGERRELAY, relay);                      //stan niski na bicie odpowiedzialnym za generator mgly
-  fogger_status==true;                                 //informacja ze fogger jest wlaczony
-  turnOnFoggerFanMillis = millis();                    //czas wlaczenia funkcji
-    if (currentMillis - turnOnFoggerFanMillis >= fandelaytime) { //jezeli uplynal czas zamglawiania
-  turnOn_FoggerFan();                                  //wlaczenie wentylatora
+  turnOnFoggerMillis=currentMillis;
+  check_status=true;
+  fogger_status=true;                                 //informacja ze fogger jest wlaczony
   hc595(relay);
-  }
-    lightOn_FoggerDiode();                             //wlaczenie diody generatora
+  lightOn_FoggerDiode();                             //wlaczenie diody generatora
 }
 
 void turnOff_Fogger()                                  //funkcja wylaczania generatora mgly
 {                  
   set_Byte(FOGGERRELAY, relay);                        //stan wysoki na bicie odpowiedzialnym za generator mgly
-  fogger_status==false;                                //informacja ze fogger jest wylaczony
+  turnOnFoggerMillis = millis();
+  fogger_status=false;                                //informacja ze fogger jest wylaczony
   turnOff_FoggerFan();                                 //wylaczenie wentylatora 
   lightOff_FoggerDiode();                              //wylaczenie diody generatora
   hc595(relay);
@@ -572,23 +656,34 @@ void toggle_Fogger()                                    //funkcja wlaczania/wyla
 void push_Button()                                      //funkcja wlaczajaca zamglawiacz manualnie za pomoca przycisku
 {
   if (digitalRead(BUTTONPIN) == HIGH){                    //jezeli wcisnieto przycisk
+    button_status=true;
     turnOn_Fogger();                                      //wlacz zamglawiacz
-    turnOnFoggerMillis = millis();                        //czas wlaczenia funkcji
-    if (currentMillis - turnOnFoggerMillis >= foggingtime) { //jezeli uplynal czas zamglawiania
-        turnOff_Fogger();                                 //wylacz zamglawiacz
-    }
+    turnOnButtonMillis=currentMillis;
+
+    
   }
+}
+
+void check_button(){
+  
+  
+      if (button_status==true){
+        if (currentMillis >=  (turnOnButtonMillis + foggingtime)) { //jezeli uplynal czas zamglawiania
+        turnOff_Fogger();                                  //wlaczenie wentylatora
+        button_status=false;
+        }
+      }
 }
 
 
 //*************************************          SERIAL MONITOR          **************************************
 
-void print_Sensor()                                   //funkcja wyswietlajaca odczyt czujnika DHT21 na monitorze portu szeregowego
-{
-Serial.print(TxFrame.values.temperature);             //wyswietl temperature
-Serial.print(" ");
-Serial.println(TxFrame.values.humidity);              //wyswietl wilgotnosc
-} 
+//void print_Sensor()                                   //funkcja wyswietlajaca odczyt czujnika DHT21 na monitorze portu szeregowego
+//{
+//Serial.print(TxFrame.values.temperature);             //wyswietl temperature
+//Serial.print(" ");
+//Serial.println(TxFrame.values.humidity);              //wyswietl wilgotnosc
+//} 
 
 void print_Clock()                                    //funkcja wyswietlajaca czas i date zegara na monitorze portu szeregowego
 {
@@ -640,7 +735,7 @@ incomingByte = Serial.read();                         //przypisanie odczytu port
 if (incomingByte == '1') {                            //jezeli wyslano 1 to wyswietl odczyt czujnika DHT21
   read_SensorDHT21();
   Serial.print("Odczyt czujnika DHT: ");
-  print_Sensor();
+//  print_Sensor();
 }
 
 if (incomingByte == '2') {                            //jezeli wyslano 2 to wyswietl aktualna godzine i date z zegara
@@ -700,7 +795,7 @@ Serial.println(analogRead(LIGHTSENSORPIN));
 
 void control(){                                                     
                  
-float actual_temperature = sensor.readTemperature();      
+float actual_temperature = sensor.readTemperature();     
 
 if(tm.Hour >= morning_hour && tm.Hour < night_hour){
 setpoint_temperature = day_temperature;
@@ -737,12 +832,16 @@ if(setpoint_humidity >= actual_humidity){                            //jezeli wi
 
 void loop()                                          //petla glowna programu
 {
+  currentMillis = millis();     
+  check_fogger_fan(); 
+  check_button();     
+  transmision();                      
   RTC.read(tm);
   hc595(relay);
-  read_Serial();
+//  read_Serial();
   lcdDisplay();
   rgb_Control(OCR2B);
-  control();
+//  control();
   push_Button(); 
   day_lightning();
   night_lightning();
