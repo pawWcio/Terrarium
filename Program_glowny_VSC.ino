@@ -68,10 +68,11 @@ bool check_status=false;
 bool button_status=false;
 bool fogger_status=false;                              //sprawdzanie dzialania foggera
 bool bulb_status=false;                               //sprawdzanie dzialania zarowki
-const int TX_FRAME_SIZE = 21;
-const int RX_FRAME_SIZE = 21;
+const int TX_FRAME_SIZE = 14;
+const int RX_FRAME_SIZE = 14;
 const int START_CODE = 0x40;
 const int END_CODE = 0x80;
+float temp_temperature=0.0;
 
 int pwmPin = 3; // digital PWM pin 9
 int pwmVal = 1; // The PWM Value
@@ -102,9 +103,6 @@ const char *monthName[12] = {                       //definicja tablicy miesięc
 struct dataTX
 {
   uint8_t start_code;
-  uint8_t one;
-  uint16_t two;
-  uint32_t three;
   float value_temperature;
   float value_humidity;
   uint8_t value_fan;
@@ -122,11 +120,8 @@ union frameTX_u {
 struct dataRX
 {
   uint8_t start_code;
-  uint8_t receive_one;
-  uint16_t receive_two;
-  uint32_t receive_three;
-  uint16_t receive_temperature;
-  uint16_t receive_humidity;
+  float receive_temperature;
+  float receive_humidity;
   uint8_t receive_fan;
   uint8_t receive_time;
   uint8_t receive_bulb;
@@ -183,9 +178,6 @@ void setup()                                        //funkcja konfiguracyjna
 
   frameTX.bytes = new uint8_t[TX_FRAME_SIZE];
   frameRX.bytes = new uint8_t[RX_FRAME_SIZE];
-  frameTX.data->one=4;
-  frameTX.data->two=300;
-  frameTX.data->three=121;
   frameTX.data->value_temperature = sensor.readTemperature();
   frameTX.data->value_humidity = sensor.readHumidity();
   frameTX.data->value_fan = OCR2B;
@@ -222,19 +214,22 @@ void transmision(){
 
   if (Serial.available() >= RX_FRAME_SIZE)
   {
-    for (byte i = 0; i < RX_FRAME_SIZE; i++)
-    {
-      frameRX.bytes[i] = Serial.read();
+    frameRX.bytes[0]= Serial.read();
+    if(frameRX.data->start_code == START_CODE ){
+      for (byte i = 1; i < RX_FRAME_SIZE; i++)
+      {
+        frameRX.bytes[i] = Serial.read();
+      }
+      if(frameRX.data->end_code==END_CODE){
+        temp_temperature=frameRX.data->receive_temperature;
+      }
     }
-      frameTX.data->one = frameRX.data->receive_one;
-      frameTX.data->two = frameRX.data->receive_two;
-      frameTX.data->three = frameRX.data->receive_three;
-      frameTX.data->value_temperature = frameRX.data->receive_temperature;
-      frameTX.data->value_humidity = frameRX.data->receive_humidity;
-      frameTX.data->value_fan = frameRX.data->receive_fan;
-      frameTX.data->value_time = frameRX.data->receive_time;
-      frameTX.data->value_bulb = frameRX.data->receive_bulb;
-      frameTX.data->value_fogger = frameRX.data->receive_fogger;
+//      frameTX.data->value_temperature = frameRX.data->receive_temperature;
+//      frameTX.data->value_humidity = frameRX.data->receive_humidity;
+//      frameTX.data->value_fan = frameRX.data->receive_fan;
+//      frameTX.data->value_time = frameRX.data->receive_time;
+//      frameTX.data->value_bulb = frameRX.data->receive_bulb;
+//      frameTX.data->value_fogger = frameRX.data->receive_fogger;
   }
 }
 
@@ -323,7 +318,7 @@ bool getDate(const char *str)                       //funkcja ustawiajaca date z
 void lcdDisplay()                                    //funkcja wyswietlajaca dane na wyswietlaczu LCD
 {
  char buff [16];                                     //stworzenie bufora znakow
- lcd.setCursor(0,0);                                 //ustawienie kursora na wyswietlaczu
+ lcd.setCursor(0,0);                                 //ustawienie kursora na wyswietlaczu 
  int i_hour = sprintf(buff, "%d:", tm.Hour);         //sprawdzanie warunkow wyswietlania
    if (i_hour<3){
    i_hour = sprintf(buff, "0%d:", tm.Hour);
@@ -351,7 +346,8 @@ void lcdDisplay()                                    //funkcja wyswietlajaca dan
            lcd.print(buff );                          //wyswietlanie aktualnej daty na wyswietlaczu
            
 lcd.setCursor(10,0);
-lcd.print(sensor.readTemperature(),1);                //wyswietlanie aktualnej temperatury na wyswietlaczu
+lcd.print(temp_temperature,1);     
+//lcd.print(sensor.readTemperature(),1);                //wyswietlanie aktualnej temperatury na wyswietlaczu
 lcd.setCursor(14, 0);
 lcd.print((char)223);                                 //wyswietlanie znaku stopni na wyswietlaczu
 lcd.setCursor(15, 0);
@@ -659,13 +655,10 @@ void push_Button()                                      //funkcja wlaczajaca zam
     button_status=true;
     turnOn_Fogger();                                      //wlacz zamglawiacz
     turnOnButtonMillis=currentMillis;
-
-    
   }
 }
 
 void check_button(){
-  
   
       if (button_status==true){
         if (currentMillis >=  (turnOnButtonMillis + foggingtime)) { //jezeli uplynal czas zamglawiania
@@ -791,6 +784,11 @@ Serial.println(analogRead(LIGHTSENSORPIN));
 }
 
 
+void check(){                                           //funkcja sprawdzajaca statusy
+  check_button();
+  check_fogger_fan();
+}
+
 //*************************************       CONTROL ALGORITM      **************************************
 
 void control(){                                                     
@@ -833,8 +831,7 @@ if(setpoint_humidity >= actual_humidity){                            //jezeli wi
 void loop()                                          //petla glowna programu
 {
   currentMillis = millis();     
-  check_fogger_fan(); 
-  check_button();     
+  check();     
   transmision();                      
   RTC.read(tm);
   hc595(relay);
