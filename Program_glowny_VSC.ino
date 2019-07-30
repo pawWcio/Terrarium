@@ -209,28 +209,47 @@ void transmision(){
   frameTX.data->value_time = tm.Hour;
   frameTX.data->value_bulb = bulb_status;
   frameTX.data->value_fogger=fogger_status;
-  
-  Serial.write(frameTX.bytes, TX_FRAME_SIZE);
 
+//String crc= "1011";                          //kod crc
+//String encoded= "00000";                          //zakodowane bity
+//int crc_size= sizeof(crc);                  //dlugosc kodu crc
+//int encoded_size= sizeof(encoded);          //dlugosc zdekodowanych bitow
+
+  Serial.write(frameTX.bytes, TX_FRAME_SIZE);
+  
   if (Serial.available() >= RX_FRAME_SIZE)
   {
-    frameRX.bytes[0]= Serial.read();
-    if(frameRX.data->start_code == START_CODE ){
+   frameRX.bytes[0]= Serial.read();
+     if(frameRX.data->start_code == START_CODE ){
       for (byte i = 1; i < RX_FRAME_SIZE; i++)
       {
         frameRX.bytes[i] = Serial.read();
       }
       if(frameRX.data->end_code==END_CODE){
-        temp_temperature=frameRX.data->receive_temperature;
+
+        //encoded += frameRX.bytes[];
+            //for(int i=1; i<=crc_size-1; i++){             //dodajemy wyzerowane bity
+            //  encoded+='0';  
+            //for(int j=0; j<= encoded_size-crc_size; j++ )
+                   //while(frameRX.bytes[i]!=0){
+                   //}
+              //encoded[i+j]=encoded[j]^crc[j];
+
+//String encoded_crc = encoded.substring((encoded_size-_crc_size), encoded_size+1); //wyodrebniony kod crc
+//String encoded_frame = frame+encoded_crc;                                         //wyodrebniona ramka z dodanym kodem crc
+              
+//temp_temperature = frameRX.data->receive_temperature;
+//Serial.write(frameRX.bytes, RX_FRAME_SIZE);
       }
     }
+  }
 //      frameTX.data->value_temperature = frameRX.data->receive_temperature;
 //      frameTX.data->value_humidity = frameRX.data->receive_humidity;
 //      frameTX.data->value_fan = frameRX.data->receive_fan;
 //      frameTX.data->value_time = frameRX.data->receive_time;
 //      frameTX.data->value_bulb = frameRX.data->receive_bulb;
 //      frameTX.data->value_fogger = frameRX.data->receive_fogger;
-  }
+  
 }
 
 
@@ -346,8 +365,8 @@ void lcdDisplay()                                    //funkcja wyswietlajaca dan
            lcd.print(buff );                          //wyswietlanie aktualnej daty na wyswietlaczu
            
 lcd.setCursor(10,0);
-lcd.print(temp_temperature,1);     
-//lcd.print(sensor.readTemperature(),1);                //wyswietlanie aktualnej temperatury na wyswietlaczu
+//lcd.print(temp_temperature,1);                      //temperatura do testow transmisji
+lcd.print(sensor.readTemperature(),1);                //wyswietlanie aktualnej temperatury na wyswietlaczu
 lcd.setCursor(14, 0);
 lcd.print((char)223);                                 //wyswietlanie znaku stopni na wyswietlaczu
 lcd.setCursor(15, 0);
@@ -842,5 +861,5 @@ void loop()                                          //petla glowna programu
   push_Button(); 
   day_lightning();
   night_lightning();
-  if (Serial.available()>0) read_Serial();
+ // if (Serial.available()>0) read_Serial();
 }
